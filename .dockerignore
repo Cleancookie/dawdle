@@ -1,0 +1,8 @@
+vendor/
+node_modules/
+.git/
+storage/logs/*.log
+*.log
+.env
+.env.*
+!.env.example

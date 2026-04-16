@@ -1,0 +1,169 @@
+services:
+
+  # ── PHP application (Laravel) ──────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - .:/var/www/html
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: "http://localhost:${APP_PORT:-8000}"
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-dawdle}
+      DB_USERNAME: ${DB_USERNAME:-dawdle}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      BROADCAST_CONNECTION: reverb
+      REVERB_APP_ID: ${REVERB_APP_ID:-dawdle-local}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-dawdle-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-dawdle-secret}
+      REVERB_HOST: reverb
+      REVERB_PORT: ${REVERB_PORT:-8080}
+      REVERB_SCHEME: http
+      MAIL_MAILER: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Healthy once artisan responds — reverb & queue depend on this
+    healthcheck:
+      test: ["CMD", "php", "artisan", "--version"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    networks:
+      - dawdle
+
+  # ── Laravel Reverb (WebSocket server) ─────────────────────────────────────
+  reverb:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080", "--debug"]
+    ports:
+      - "${REVERB_PORT:-8080}:8080"
+    volumes:
+      - .:/var/www/html
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: local
+      DB_HOST: mysql
+      DB_DATABASE: ${DB_DATABASE:-dawdle}
+      DB_USERNAME: ${DB_USERNAME:-dawdle}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+      BROADCAST_CONNECTION: reverb
+      REVERB_APP_ID: ${REVERB_APP_ID:-dawdle-local}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-dawdle-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-dawdle-secret}
+      REVERB_HOST: 0.0.0.0
+      REVERB_PORT: ${REVERB_PORT:-8080}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - dawdle
+
+  # ── Laravel queue worker ───────────────────────────────────────────────────
+  queue:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--timeout=90"]
+    volumes:
+      - .:/var/www/html
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: local
+      DB_HOST: mysql
+      DB_DATABASE: ${DB_DATABASE:-dawdle}
+      DB_USERNAME: ${DB_USERNAME:-dawdle}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - dawdle
+
+  # ── MySQL 8 ────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: ${DB_DATABASE:-dawdle}
+      MYSQL_USER: ${DB_USERNAME:-dawdle}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - dawdle
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - dawdle
+
+  # ── Node / Vite dev server ────────────────────────────────────────────────
+  node:
+    image: node:22-alpine
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+    ports:
+      - "${VITE_PORT:-5173}:5173"
+    # npm install runs first so the service self-boots after a fresh clone
+    command: sh -c "npm install && npm run dev"
+    networks:
+      - dawdle
+
+  # ── Mailpit (email catcher for local dev) ─────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "${MAIL_UI_PORT:-8025}:8025"  # Web UI
+      - "1025:1025"                    # SMTP
+    networks:
+      - dawdle
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  dawdle:
+    driver: bridge
