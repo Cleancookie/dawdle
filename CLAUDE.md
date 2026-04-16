@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Dawdle is a browser-based social gaming platform (think OMGPOP). Friends join a room via invite link, play casual games together, and chat. See `SPEC.md` for the full founding specification — it is the source of truth.
+Dawdle is a browser-based social gaming platform (think OMGPOP). Friends join a room via invite link, play casual games together, and chat. See `docs/SPEC.md` for the full founding specification — it is the source of truth.
 
 **v1 scope:** Guest-only play, invite-link rooms, per-room chat, two games (Tic Tac Toe + Pictionary), spectator support.
 
