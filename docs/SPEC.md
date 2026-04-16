@@ -53,7 +53,7 @@ Dawdle is a browser-based social gaming platform. The purpose is casual play —
 |---|---|---|
 | Frontend Shell | React (Vite) | Component lifecycle maps cleanly to PhaserJS mount/unmount |
 | Game Rendering | PhaserJS 3 | Mature, browser-native, self-contained game instances |
-| Backend | Laravel 11 (PHP) | Developer's primary stack; handles HTTP + WebSocket |
+| Backend | Laravel 13 (PHP) | Developer's primary stack; handles HTTP + WebSocket |
 | WebSockets | Laravel Reverb | Native Laravel WebSocket server; presence channels; no extra service |
 | Cache / Game State | Redis | Fast ephemeral state; TTL-based room cleanup |
 | Database | MySQL | Persistent storage for rooms, results |
@@ -82,14 +82,12 @@ Laravel Reverb is built on ReactPHP (async I/O) and handles presence channels, e
           │ HTTP/REST           │ WebSocket (Reverb)
           ▼                     ▼
 ┌─────────────────────────────────────────┐
-│             Laravel 11                  │
+│             Laravel 13                  │
 │                                         │
-│  RoomController   GameController        │
-│  GuestController  ChatController        │
-│                                         │
-│  Games/                                 │
-│    TicTacToe/GameLogic.php              │
-│    Pictionary/GameLogic.php             │
+│  Modules/Room/   Modules/Game/          │
+│    RoomService     GameService          │
+│    ChatService     TicTacToe/Logic      │
+│                    Pictionary/Logic     │
 │                                         │
 │  Broadcasting (Reverb presence channels)│
 └────────────┬──────────────┬────────────┘

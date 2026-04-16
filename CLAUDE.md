@@ -10,7 +10,7 @@ Dawdle is a browser-based social gaming platform (think OMGPOP). Friends join a 
 
 ## Stack
 
-- **Backend:** Laravel 11 (PHP) + Laravel Reverb (WebSockets)
+- **Backend:** Laravel 13 (PHP) + Laravel Reverb (WebSockets)
 - **Frontend:** React (Vite) SPA served by Laravel
 - **Games:** PhaserJS 3 — each game is an isolated JS module mounted by the shell
 - **Cache / live state:** Redis (all game state lives here during play)
@@ -73,32 +73,42 @@ docker compose exec app php artisan <command>
 
 ### Directory Structure
 
+The backend uses **nWidart Laravel Modules** for a DDD-inspired modular structure. Each module is self-contained with its own routes, controllers, models, services, events, and migrations.
+
 ```
-app/
-  Games/
-    TicTacToe/
-      GameLogic.php     ← pure PHP, zero Laravel deps — game rules only
-      GameChannel.php   ← Reverb channel handler, calls GameLogic
-    Pictionary/
-      GameLogic.php
-      GameChannel.php
-  Http/
-    Controllers/
-      RoomController.php
-      GameController.php
-      ChatController.php
+Modules/
+  Room/                         ← room lifecycle, player presence, chat
+    Http/Controllers/
+    Models/                     ← Room, RoomGuest
+    Services/RoomService.php    ← domain logic (no HTTP concerns)
+    Events/                     ← PlayerJoined, PlayerLeft, etc.
+    Database/Migrations/
+    Routes/api.php
+    Providers/RoomServiceProvider.php
+  Game/                         ← game sessions, moves, results
+    Http/Controllers/
+    Models/                     ← GameSession, GameResult
+    Services/
+      TicTacToe/GameLogic.php   ← pure PHP, zero Laravel deps
+      Pictionary/GameLogic.php
+    Events/
+    Database/Migrations/
+    Routes/api.php
+    Providers/GameServiceProvider.php
 
 resources/js/
   games/
-    tic-tac-toe/index.js    ← PhaserJS game module
+    tic-tac-toe/index.js        ← PhaserJS game module
     pictionary/index.js
-  components/               ← React shell components
-  app.jsx                   ← Shell entry point
+  components/                   ← React shell components
+  app.jsx                       ← Shell entry point
 ```
 
 ### Key Architectural Rules
 
-**Game logic isolation:** `app/Games/{Type}/GameLogic.php` must have zero framework coupling (no Laravel facades, no Eloquent, no `app()`). This is the migration path to Node.js if needed later — only these files get rewritten.
+**Module boundaries:** Each module owns its domain. Cross-module calls go through Services, never directly between Controllers or Models. The `Room` module owns chat (it shares the same Reverb channel and room lifecycle).
+
+**Game logic isolation:** `Modules/Game/Services/{Type}/GameLogic.php` must have zero framework coupling (no Laravel facades, no Eloquent, no `app()`). This is the migration path to Node.js if needed later — only these files get rewritten.
 
 **Shell owns the WebSocket:** PhaserJS game modules never manage their own WebSocket connection. The shell passes `socket` in `GameConfig` and relays moves. Games fire events; the shell sends them.
 
@@ -150,7 +160,7 @@ Game starts when all `player`-role guests have `ready: true` (minimum 2). Guests
 
 ### Adding a New Game
 
-1. Create `app/Games/{GameType}/GameLogic.php` (pure logic) and `GameChannel.php`
+1. Create `Modules/Game/Services/{GameType}/GameLogic.php` (pure logic, no Laravel deps)
 2. Create `resources/js/games/{game-type}/index.js` implementing the shell contract
 3. Register the game type in the game registry (one place in the shell)
 4. Add the game type to the `game_sessions.game_type` enum in the migration

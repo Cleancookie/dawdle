@@ -134,6 +134,22 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 
 ---
 
+## ADR-011 · Modular architecture using nWidart Laravel Modules + light DDD
+
+**Status:** Accepted  
+**Date:** 2026-04-16  
+**Context:** All application code was going to live in the standard Laravel `app/` directory. With multiple distinct domains (rooms, games, chat) this would become unorganised quickly. Developer expressed interest in DDD and modular structure from the outset.  
+**Decision:** Use [nWidart/laravel-modules](https://github.com/nWidart/laravel-modules) for module scaffolding. Apply DDD-inspired layering within each module (Controllers → Services → Models/Events) but skip full DDD ceremony (no repository interfaces, no value objects, no aggregate roots). Two modules: `Room` and `Game`. Chat lives inside the `Room` module — same Reverb channel, same lifecycle, too thin to warrant its own module initially.  
+**Consequences:**
+- ✅ Each domain is self-contained with its own routes, migrations, models, services, and events
+- ✅ Clear boundary for future extraction (e.g. `Game` module → Node.js service)
+- ✅ Thin controllers — domain logic in Services makes testing straightforward
+- ✅ Chat folded into `Room` keeps things simple; easy to extract later if it grows
+- ⚠️ nWidart adds a layer of module auto-discovery — new developers need to understand the module structure
+- ⚠️ Full DDD deferred deliberately — revisit if domain complexity warrants it
+
+---
+
 ## ADR-010 · Decisions and opinions are logged as ADRs
 
 **Status:** Accepted  

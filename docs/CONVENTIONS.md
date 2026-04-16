@@ -33,16 +33,45 @@ Conventions for the Dawdle codebase. These apply to all AI-generated and human-w
 
 ---
 
+## Module Architecture (nWidart Laravel Modules + Light DDD)
+
+The backend is organised into self-contained modules using [nWidart/laravel-modules](https://github.com/nWidart/laravel-modules). Each module owns a single domain.
+
+**Modules:**
+- `Room` — room lifecycle, player presence, ready state, chat
+- `Game` — game sessions, move validation, game logic, results
+
+**Within each module, follow these layers:**
+
+| Layer | Location | Rule |
+|---|---|---|
+| Controller | `Http/Controllers/` | Thin — validate input, call service, return response. No business logic. |
+| Service | `Services/` | Domain logic. No HTTP concerns (`Request`, `Response`). Can use Eloquent. |
+| Model | `Models/` | Eloquent models. Relationships and scopes only — no business logic. |
+| Event | `Events/` | Domain events that extend `ShouldBroadcast`. One event per thing that happened. |
+| Request | `Http/Requests/` | Form request validation. |
+
+**What we deliberately skip** (full DDD ceremony not warranted at this stage):
+- Repository interfaces/implementations — Eloquent is already a repository
+- Value objects for simple types — use typed properties instead
+- Aggregate roots — Eloquent models serve this purpose cleanly enough
+
+**Cross-module calls:** Go through a module's `Service` class, never directly between controllers or models of different modules.
+
+---
+
 ## PHP / Laravel
 
 **Game logic isolation** is the most important rule:
 
-- `app/Games/{GameType}/GameLogic.php` — pure PHP, zero Laravel dependencies. No facades, no Eloquent, no `app()`. This is the future migration boundary to Node.js.
-- `app/Games/{GameType}/GameChannel.php` — the Reverb/Laravel layer that calls `GameLogic`.
+- `Modules/Game/Services/{GameType}/GameLogic.php` — pure PHP, zero Laravel dependencies. No facades, no Eloquent, no `app()`. This is the future migration boundary to Node.js/Go.
+- All game rules, win detection, and state transitions live here.
+- The Service layer (`Modules/Game/Services/GameService.php`) calls `GameLogic` and handles persistence/broadcasting.
 - Never read live game state from MySQL during an active game — Redis is the source of truth during play.
 - All Redis keys are prefixed `dawdle:` — see `docs/SPEC.md §12` for the full schema.
 
 **Migrations:**
+- Each module owns its migrations in `Modules/{Name}/Database/Migrations/`
 - Use ULIDs (not auto-increment integers) for primary keys on `rooms` and `game_sessions` — these IDs are exposed in URLs and WebSocket payloads.
 - Use `bigint` for high-volume join tables (`room_guests`, `game_results`).
 
