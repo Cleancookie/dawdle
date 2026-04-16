@@ -4,6 +4,17 @@ Conventions for the Dawdle codebase. These apply to all AI-generated and human-w
 
 ---
 
+## General Principle: Prefer Simplicity
+
+**Write the simplest code that correctly solves the problem.** Simple code is easier to read, easier to debug, and has fewer places for bugs to hide.
+
+- Avoid abstractions until they are clearly needed — duplication is preferable to a premature abstraction
+- Avoid indirection (extra classes, interfaces, wrappers) unless it earns its keep
+- Short, flat functions are better than deep call chains
+- If you find yourself explaining what the code does, it probably needs to be simpler
+
+---
+
 ## Git
 
 - **Commit messages use gitmojis** — prefix every commit with the appropriate emoji:
