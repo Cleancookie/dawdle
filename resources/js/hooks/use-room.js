@@ -2,14 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
-let echo = null;
+let echoInstance = null;
+let echoGuestId = null;
 
 function getEcho(guestId) {
-    if (echo) return echo;
+    if (echoInstance && echoGuestId === guestId) return echoInstance;
+
+    if (echoInstance) {
+        echoInstance.disconnect();
+    }
 
     window.Pusher = Pusher;
-
-    echo = new Echo({
+    echoInstance = new Echo({
         broadcaster: 'reverb',
         key: import.meta.env.VITE_REVERB_APP_KEY,
         wsHost: import.meta.env.VITE_REVERB_HOST ?? 'localhost',
@@ -21,8 +25,8 @@ function getEcho(guestId) {
             headers: { 'X-Guest-ID': guestId },
         },
     });
-
-    return echo;
+    echoGuestId = guestId;
+    return echoInstance;
 }
 
 export function useRoom(roomId, guestId) {

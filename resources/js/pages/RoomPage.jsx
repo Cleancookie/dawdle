@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRoom } from '../hooks/use-room';
 
 function LobbyView({ roomCode }) {
@@ -11,13 +11,13 @@ function LobbyView({ roomCode }) {
 }
 
 export default function RoomPage({ guest, roomCode, navigate }) {
-    const [room, setRoom] = React.useState(null);
-    const [loading, setLoading] = React.useState(true);
-    const [copied, setCopied] = React.useState(false);
+    const [room, setRoom] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [copied, setCopied] = useState(false);
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
 
-    React.useEffect(() => {
+    useEffect(() => {
         fetch(`/api/v1/rooms/${roomCode}`, {
             headers: { 'X-Guest-ID': guest.guestId },
         })

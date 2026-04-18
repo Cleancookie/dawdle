@@ -12,8 +12,16 @@ class RoomService
 {
     public function create(string $guestId, string $displayName): array
     {
+        $attempts = 0;
         do {
-            $code = strtoupper(substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 6));
+            if (++$attempts > 10) {
+                throw new \RuntimeException('Could not generate unique room code');
+            }
+            $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            $code = '';
+            for ($i = 0; $i < 6; $i++) {
+                $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+            }
         } while (Room::where('code', $code)->exists());
 
         $room = Room::create([
@@ -22,7 +30,14 @@ class RoomService
             'host_guest_id' => $guestId,
         ]);
 
-        Redis::hset("dawdle:room:{$room->id}", 'status', 'waiting', 'code', $code, 'host_guest_id', $guestId);
+        Redis::hset(
+            "dawdle:room:{$room->id}",
+            'status', 'waiting',
+            'code', $code,
+            'hostGuestId', $guestId,
+            'selectedGame', '',
+            'lastActivityAt', now()->toISOString(),
+        );
         Redis::expire("dawdle:room:{$room->id}", 7200);
 
         Redis::hset("dawdle:guest:{$guestId}", 'displayName', $displayName, 'roomId', $room->id, 'role', 'player');
@@ -66,7 +81,8 @@ class RoomService
             throw new \InvalidArgumentException('Room is closed');
         }
 
-        $role = $room->status === 'waiting' ? 'player' : 'spectator';
+        $status = Redis::hget("dawdle:room:{$room->id}", 'status') ?? $room->status;
+        $role = $status === 'waiting' ? 'player' : 'spectator';
 
         $existing = RoomGuest::where('room_id', $room->id)->where('guest_id', $guestId)->first();
 
