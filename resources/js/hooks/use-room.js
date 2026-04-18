@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
@@ -31,7 +31,7 @@ function getEcho(guestId) {
 
 export function useRoom(roomId, guestId) {
     const [members, setMembers] = useState([]);
-    const channelRef = useRef(null);
+    const [channel, setChannel] = useState(null);
 
     useEffect(() => {
         if (!roomId || !guestId) return;
@@ -39,18 +39,18 @@ export function useRoom(roomId, guestId) {
         const instance = getEcho(guestId);
         const channelName = `room.${roomId}`;
 
-        const channel = instance.join(channelName)
+        const ch = instance.join(channelName)
             .here((here) => setMembers(here))
             .joining((member) => setMembers((prev) => [...prev, member]))
             .leaving((member) => setMembers((prev) => prev.filter((m) => m.id !== member.id)));
 
-        channelRef.current = channel;
+        setChannel(ch);
 
         return () => {
             instance.leave(channelName);
-            channelRef.current = null;
+            setChannel(null);
         };
     }, [roomId, guestId]);
 
-    return { members, channel: channelRef.current };
+    return { members, channel };
 }

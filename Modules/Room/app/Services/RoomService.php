@@ -3,6 +3,7 @@
 namespace Modules\Room\Services;
 
 use Illuminate\Support\Facades\Redis;
+use Modules\Room\Events\ChatMessageSent;
 use Modules\Room\Events\PlayerJoined;
 use Modules\Room\Events\PlayerLeft;
 use Modules\Room\Models\Room;
@@ -108,6 +109,29 @@ class RoomService
             'code'   => $room->code,
             'role'   => $role,
         ];
+    }
+
+    public function sendChat(string $code, string $guestId, string $message): void
+    {
+        $roomId = Room::where('code', $code)->value('id');
+        if (!$roomId) {
+            throw new \Illuminate\Database\Eloquent\ModelNotFoundException();
+        }
+
+        $guest = Redis::hgetall("dawdle:guest:{$guestId}");
+        if (empty($guest) || ($guest['roomId'] ?? null) !== $roomId) {
+            throw new \InvalidArgumentException('Guest is not a member of this room');
+        }
+
+        $displayName = $guest['displayName'] ?? 'Guest';
+
+        broadcast(new ChatMessageSent(
+            $roomId,
+            $guestId,
+            $displayName,
+            $message,
+            now()->toISOString(),
+        ))->toOthers();
     }
 
     public function leave(string $code, string $guestId): void

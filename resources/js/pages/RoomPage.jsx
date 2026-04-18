@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRoom } from '../hooks/use-room';
 
 function LobbyView({ roomCode }) {
@@ -14,6 +14,10 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [room, setRoom] = useState(null);
     const [loading, setLoading] = useState(true);
     const [copied, setCopied] = useState(false);
+    const [messages, setMessages] = useState([]);
+    const [chatInput, setChatInput] = useState('');
+    const [chatSending, setChatSending] = useState(false);
+    const messagesEndRef = useRef(null);
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
 
@@ -33,6 +37,48 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             })
             .finally(() => setLoading(false));
     }, [roomCode, guest.guestId, navigate]);
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.chat.message', (data) => {
+            setMessages((prev) => [...prev, data]);
+        });
+        return () => {
+            channel.stopListening('.chat.message');
+        };
+    }, [channel]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+
+    async function sendChat() {
+        const text = chatInput.trim();
+        if (!text || !room || chatSending) return;
+        setChatSending(true);
+        const optimistic = {
+            guestId: guest.guestId,
+            displayName: guest.displayName,
+            message: text,
+            timestamp: new Date().toISOString(),
+        };
+        setChatInput('');
+        setMessages((prev) => [...prev, optimistic]);
+        try {
+            await fetch(`/api/v1/rooms/${roomCode}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Guest-ID': guest.guestId,
+                },
+                body: JSON.stringify({ message: text }),
+            });
+        } catch {
+            // message already shown optimistically; silent fail is acceptable for chat
+        } finally {
+            setChatSending(false);
+        }
+    }
 
     function copyInviteLink() {
         navigator.clipboard.writeText(window.location.href);
@@ -96,16 +142,36 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
                 {/* Chat sidebar */}
                 <aside className="flex-[3] flex flex-col bg-white">
-                    <div className="flex-1 overflow-y-auto p-4 text-sm text-gray-400 italic">
-                        No messages yet.
+                    <div className="flex-1 overflow-y-auto p-4 text-sm">
+                        {messages.length === 0 ? (
+                            <p className="text-gray-400 italic">No messages yet.</p>
+                        ) : (
+                            messages.map((msg, i) => (
+                                <div key={`${msg.timestamp}-${msg.guestId}-${i}`} className="mb-2">
+                                    <span className="font-semibold text-gray-700">{msg.displayName}</span>
+                                    <span className="text-gray-600"> {msg.message}</span>
+                                </div>
+                            ))
+                        )}
+                        <div ref={messagesEndRef} />
                     </div>
-                    <div className="p-3 border-t border-gray-200">
+                    <div className="p-3 border-t border-gray-200 flex gap-2">
                         <input
                             type="text"
-                            disabled
-                            placeholder="Chat coming soon..."
-                            className="w-full px-3 py-2 text-sm rounded border border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed"
+                            value={chatInput}
+                            onChange={(e) => setChatInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                            disabled={chatSending || !room}
+                            placeholder="Say something..."
+                            className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
                         />
+                        <button
+                            onClick={sendChat}
+                            disabled={chatSending || !room}
+                            className="px-3 py-2 text-sm rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Send
+                        </button>
                     </div>
                 </aside>
             </div>

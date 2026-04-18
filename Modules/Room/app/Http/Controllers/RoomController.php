@@ -49,6 +49,22 @@ class RoomController extends Controller
         return response()->json($result);
     }
 
+    public function chat(Request $request, string $code): JsonResponse
+    {
+        $request->validate(['message' => 'required|string|min:1|max:500']);
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $this->roomService->sendChat($code, $guestId, $request->input('message'));
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        } catch (\InvalidArgumentException) {
+            return response()->json(['error' => 'Not a member of this room'], 403);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
     public function leave(Request $request, string $code): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');
