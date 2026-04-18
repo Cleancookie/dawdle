@@ -3,6 +3,8 @@
 namespace Modules\Room\Services;
 
 use Illuminate\Support\Facades\Redis;
+use Modules\Room\Events\PlayerJoined;
+use Modules\Room\Events\PlayerLeft;
 use Modules\Room\Models\Room;
 use Modules\Room\Models\RoomGuest;
 
@@ -33,6 +35,8 @@ class RoomService
             'role'         => 'player',
             'joined_at'    => now(),
         ]);
+
+        broadcast(new PlayerJoined($room->id, $guestId, $displayName, 'player'));
 
         return [
             'roomId'    => $room->id,
@@ -83,6 +87,8 @@ class RoomService
         Redis::hset("dawdle:guest:{$guestId}", 'displayName', $displayName, 'roomId', $room->id, 'role', $role);
         Redis::expire("dawdle:guest:{$guestId}", 86400);
 
+        broadcast(new PlayerJoined($room->id, $guestId, $displayName, $role))->toOthers();
+
         return [
             'roomId' => $room->id,
             'code'   => $room->code,
@@ -95,5 +101,7 @@ class RoomService
         RoomGuest::where('room_id', $roomId)->where('guest_id', $guestId)->update(['left_at' => now()]);
 
         Redis::del("dawdle:guest:{$guestId}");
+
+        broadcast(new PlayerLeft($roomId, $guestId));
     }
 }

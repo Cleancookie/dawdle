@@ -1,4 +1,5 @@
 import React from 'react';
+import { useRoom } from '../hooks/use-room';
 
 function LobbyView({ roomCode }) {
     return (
@@ -13,6 +14,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [room, setRoom] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [copied, setCopied] = React.useState(false);
+
+    const { members, channel } = useRoom(room?.roomId, guest.guestId);
 
     React.useEffect(() => {
         fetch(`/api/v1/rooms/${roomCode}`, {
@@ -64,6 +67,11 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                     <span className="font-mono font-bold text-lg tracking-widest text-gray-800">
                         {roomCode}
                     </span>
+                    {members.length > 0 && (
+                        <span className="text-sm text-gray-500">
+                            {members.length} {members.length === 1 ? 'player' : 'players'}
+                        </span>
+                    )}
                     <button
                         onClick={copyInviteLink}
                         className="px-3 py-1 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
