@@ -33,7 +33,7 @@ export function useRoom(roomId, guestId) {
         if (!roomId || !guestId) return;
 
         const instance = getEcho(guestId);
-        const channelName = `presence-room.${roomId}`;
+        const channelName = `room.${roomId}`;
 
         const channel = instance.join(channelName)
             .here((here) => setMembers(here))

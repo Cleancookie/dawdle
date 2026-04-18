@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Modules\Room\Models\Room;
 use Modules\Room\Services\RoomService;
 
 class RoomController extends Controller
@@ -15,8 +14,9 @@ class RoomController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $request->validate(['display_name' => 'required|string|min:1|max:32']);
         $guestId = $request->header('X-Guest-ID');
-        $displayName = $request->input('display_name') ?: 'Guest';
+        $displayName = $request->input('display_name');
 
         return response()->json($this->roomService->create($guestId, $displayName), 201);
     }
@@ -34,8 +34,9 @@ class RoomController extends Controller
 
     public function join(Request $request, string $code): JsonResponse
     {
+        $request->validate(['display_name' => 'required|string|min:1|max:32']);
         $guestId = $request->header('X-Guest-ID');
-        $displayName = $request->input('display_name') ?: 'Guest';
+        $displayName = $request->input('display_name');
 
         try {
             $result = $this->roomService->join($code, $guestId, $displayName);
@@ -51,15 +52,7 @@ class RoomController extends Controller
     public function leave(Request $request, string $code): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');
-
-        $roomId = Room::where('code', $code)->value('id');
-
-        if ($roomId === null) {
-            return response()->json(['error' => 'Room not found'], 404);
-        }
-
-        $this->roomService->leave($roomId, $guestId);
-
+        $this->roomService->leave($code, $guestId);
         return response()->json(['ok' => true]);
     }
 }

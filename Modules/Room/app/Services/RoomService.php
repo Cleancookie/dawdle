@@ -36,8 +36,6 @@ class RoomService
             'joined_at'    => now(),
         ]);
 
-        broadcast(new PlayerJoined($room->id, $guestId, $displayName, 'player'));
-
         return [
             'roomId'    => $room->id,
             'code'      => $room->code,
@@ -96,12 +94,13 @@ class RoomService
         ];
     }
 
-    public function leave(string $roomId, string $guestId): void
+    public function leave(string $code, string $guestId): void
     {
+        $roomId = Room::where('code', $code)->value('id');
+        if (!$roomId) return;
+
         RoomGuest::where('room_id', $roomId)->where('guest_id', $guestId)->update(['left_at' => now()]);
-
-        Redis::del("dawdle:guest:{$guestId}");
-
+        Redis::hdel("dawdle:guest:{$guestId}", 'roomId', 'role');
         broadcast(new PlayerLeft($roomId, $guestId));
     }
 }

@@ -112,10 +112,17 @@ The backend is organised into self-contained modules using [nWidart/laravel-modu
 
 ---
 
+## Code Review
+
+Before merging any feature, run the three reviewer profiles defined in `docs/REVIEW_PROFILES.md` as parallel subagents (Quality, Security, Architecture). Fix all **[BLOCK]** findings before committing. See that file for the full process.
+
+---
+
 ## Documentation
 
 - `docs/SPEC.md` — founding specification, source of truth for the system design
 - `docs/CONVENTIONS.md` — this file
 - `docs/DECISIONS.md` — architecture decisions and opinions log
+- `docs/REVIEW_PROFILES.md` — parallel reviewer personas for code review
 - `CLAUDE.md` — AI operational guide (stays at project root)
 - Keep `docs/` up to date as decisions are made — it's the project memory.

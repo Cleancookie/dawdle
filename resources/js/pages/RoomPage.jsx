@@ -32,7 +32,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 if (data) setRoom(data);
             })
             .finally(() => setLoading(false));
-    }, [roomCode]);
+    }, [roomCode, guest.guestId, navigate]);
 
     function copyInviteLink() {
         navigator.clipboard.writeText(window.location.href);
@@ -45,7 +45,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             navigate('/');
             return;
         }
-        fetch(`/api/v1/rooms/${room.roomId}/leave`, {
+        fetch(`/api/v1/rooms/${roomCode}/leave`, {
             method: 'DELETE',
             headers: { 'X-Guest-ID': guest.guestId },
         }).finally(() => navigate('/'));

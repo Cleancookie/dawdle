@@ -9,6 +9,15 @@ Broadcast::channel('room.{roomId}', function ($user, string $roomId) {
     if (!$guestId || !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guestId)) {
         return false;
     }
-    $displayName = Redis::hget("dawdle:guest:{$guestId}", 'displayName') ?? 'Guest';
-    return ['id' => $guestId, 'displayName' => $displayName];
+
+    $guest = Redis::hgetall("dawdle:guest:{$guestId}");
+    if (empty($guest) || ($guest['roomId'] ?? null) !== $roomId) {
+        return false;
+    }
+
+    return [
+        'id'          => $guestId,
+        'displayName' => $guest['displayName'] ?? 'Guest',
+        'role'        => $guest['role'] ?? 'spectator',
+    ];
 });
