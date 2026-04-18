@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Redis;
 use Modules\Room\Events\ChatMessageSent;
 use Modules\Room\Events\PlayerJoined;
 use Modules\Room\Events\PlayerLeft;
+use Modules\Room\Events\PlayerReady;
 use Modules\Room\Models\Room;
 use Modules\Room\Models\RoomGuest;
 
@@ -43,6 +44,7 @@ class RoomService
 
         Redis::hset("dawdle:guest:{$guestId}", 'displayName', $displayName, 'roomId', $room->id, 'role', 'player');
         Redis::expire("dawdle:guest:{$guestId}", 86400);
+        Redis::sadd("dawdle:room:{$room->id}:players", $guestId);
 
         RoomGuest::create([
             'room_id'      => $room->id,
@@ -68,9 +70,10 @@ class RoomService
         }
 
         return [
-            'roomId' => $room->id,
-            'code'   => $room->code,
-            'status' => $room->status,
+            'roomId'      => $room->id,
+            'code'        => $room->code,
+            'status'      => $room->status,
+            'hostGuestId' => $room->host_guest_id,
         ];
     }
 
@@ -101,6 +104,10 @@ class RoomService
 
         Redis::hset("dawdle:guest:{$guestId}", 'displayName', $displayName, 'roomId', $room->id, 'role', $role);
         Redis::expire("dawdle:guest:{$guestId}", 86400);
+
+        if ($role === 'player') {
+            Redis::sadd("dawdle:room:{$room->id}:players", $guestId);
+        }
 
         broadcast(new PlayerJoined($room->id, $guestId, $displayName, $role))->toOthers();
 
@@ -141,6 +148,39 @@ class RoomService
 
         RoomGuest::where('room_id', $roomId)->where('guest_id', $guestId)->update(['left_at' => now()]);
         Redis::hdel("dawdle:guest:{$guestId}", 'roomId', 'role');
+        Redis::srem("dawdle:room:{$roomId}:players", $guestId);
+        Redis::srem("dawdle:room:{$roomId}:ready", $guestId);
         broadcast(new PlayerLeft($roomId, $guestId));
+    }
+
+    public function toggleReady(string $code, string $guestId): array
+    {
+        $roomId = Room::where('code', $code)->value('id');
+        if (!$roomId) {
+            throw new \Illuminate\Database\Eloquent\ModelNotFoundException();
+        }
+
+        $key = "dawdle:room:{$roomId}:ready";
+        $alreadyReady = Redis::sismember($key, $guestId);
+
+        if ($alreadyReady) {
+            Redis::srem($key, $guestId);
+            $ready = false;
+        } else {
+            Redis::sadd($key, $guestId);
+            $ready = true;
+        }
+
+        broadcast(new PlayerReady($roomId, $guestId, $ready))->toOthers();
+
+        $playersKey = "dawdle:room:{$roomId}:players";
+        $allPlayers = Redis::smembers($playersKey);
+        $readyPlayers = Redis::smembers($key);
+
+        if (count($allPlayers) >= 2 && count($allPlayers) === count($readyPlayers)) {
+            return ['ready' => $ready, 'shouldStart' => true, 'roomId' => $roomId, 'players' => $allPlayers];
+        }
+
+        return ['ready' => $ready, 'shouldStart' => false];
     }
 }

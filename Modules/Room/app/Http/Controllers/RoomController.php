@@ -65,6 +65,19 @@ class RoomController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    public function ready(Request $request, string $code): JsonResponse
+    {
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $result = $this->roomService->toggleReady($code, $guestId);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        }
+
+        return response()->json(['ready' => $result['ready'], 'shouldStart' => $result['shouldStart']]);
+    }
+
     public function leave(Request $request, string $code): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');

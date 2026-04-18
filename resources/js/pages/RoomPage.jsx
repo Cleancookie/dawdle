@@ -1,11 +1,85 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRoom } from '../hooks/use-room';
 
-function LobbyView({ roomCode }) {
+function LobbyView({ roomCode, members, myGuestId, isHost, onReadyToggle, myReady, readySet }) {
+    const [linkCopied, setLinkCopied] = useState(false);
+
+    function copyLink() {
+        navigator.clipboard.writeText(window.location.href);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+    }
+
+    const players = members.filter((m) => m.role === 'player');
+    const spectators = members.filter((m) => m.role === 'spectator');
+
     return (
-        <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <p className="text-xl font-semibold">Waiting for players...</p>
-            <p className="mt-2 text-sm font-mono">{roomCode}</p>
+        <div className="p-6 flex flex-col gap-6">
+            <div>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Players</h2>
+                {players.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">No players yet.</p>
+                ) : (
+                    <ul className="flex flex-col gap-2">
+                        {players.map((m) => (
+                            <li key={m.id} className="flex items-center gap-2 text-sm text-gray-800">
+                                <span
+                                    className={`w-2.5 h-2.5 rounded-full shrink-0 ${readySet.has(m.id) ? 'bg-green-500' : 'bg-gray-300'}`}
+                                />
+                                <span className={m.id === myGuestId ? 'font-semibold' : ''}>{m.displayName}</span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+                {spectators.length > 0 && (
+                    <p className="mt-3 text-xs text-gray-400">
+                        Spectating: {spectators.map((s) => s.displayName).join(', ')}
+                    </p>
+                )}
+            </div>
+
+            <button
+                onClick={onReadyToggle}
+                className={`self-start px-5 py-2 rounded font-medium text-sm transition-colors ${
+                    myReady
+                        ? 'bg-green-600 hover:bg-green-700 text-white'
+                        : 'bg-gray-800 hover:bg-gray-700 text-white'
+                }`}
+            >
+                {myReady ? 'Not Ready' : 'Ready'}
+            </button>
+
+            {isHost && (
+                <div>
+                    <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                        Game
+                    </label>
+                    {/* TODO: wire selected game to backend */}
+                    <select className="px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400">
+                        <option value="tic_tac_toe">Tic Tac Toe</option>
+                        <option value="pictionary">Pictionary</option>
+                    </select>
+                </div>
+            )}
+
+            <div>
+                <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Invite Link
+                </label>
+                <div className="flex gap-2">
+                    <input
+                        readOnly
+                        value={window.location.href}
+                        className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-gray-50 text-gray-600 focus:outline-none"
+                    />
+                    <button
+                        onClick={copyLink}
+                        className="px-3 py-2 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                    >
+                        {linkCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -17,9 +91,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [messages, setMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [chatSending, setChatSending] = useState(false);
+    const [readySet, setReadySet] = useState(new Set());
+    const [myReady, setMyReady] = useState(false);
     const messagesEndRef = useRef(null);
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
+
+    // TODO: use room?.hostGuestId once the room API returns it
+    const isHost = room?.hostGuestId === guest.guestId;
 
     useEffect(() => {
         fetch(`/api/v1/rooms/${roomCode}`, {
@@ -49,8 +128,36 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     }, [channel]);
 
     useEffect(() => {
+        if (!channel) return;
+        channel.listen('.room.player_ready', ({ guestId, ready }) => {
+            setReadySet((prev) => {
+                const next = new Set(prev);
+                if (ready) next.add(guestId); else next.delete(guestId);
+                return next;
+            });
+        });
+        return () => channel.stopListening('.room.player_ready');
+    }, [channel]);
+
+    useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    async function handleReadyToggle() {
+        const res = await fetch(`/api/v1/rooms/${roomCode}/ready`, {
+            method: 'POST',
+            headers: { 'X-Guest-ID': guest.guestId },
+        });
+        if (res.ok) {
+            const data = await res.json();
+            setMyReady(data.ready);
+            setReadySet((prev) => {
+                const next = new Set(prev);
+                if (data.ready) next.add(guest.guestId); else next.delete(guest.guestId);
+                return next;
+            });
+        }
+    }
 
     async function sendChat() {
         const text = chatInput.trim();
@@ -137,7 +244,16 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             <div className="flex flex-1 overflow-hidden">
                 {/* Game area */}
                 <main className="flex-[7] overflow-y-auto border-r border-gray-200">
-                    <LobbyView roomCode={roomCode} />
+                    <LobbyView
+                        roomCode={roomCode}
+                        members={members}
+                        myGuestId={guest.guestId}
+                        channel={channel}
+                        isHost={isHost}
+                        onReadyToggle={handleReadyToggle}
+                        myReady={myReady}
+                        readySet={readySet}
+                    />
                 </main>
 
                 {/* Chat sidebar */}
