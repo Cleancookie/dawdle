@@ -3,54 +3,63 @@
 namespace Modules\Room\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Modules\Room\Models\Room;
+use Modules\Room\Services\RoomService;
 
 class RoomController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    public function __construct(private RoomService $roomService) {}
+
+    public function store(Request $request): JsonResponse
     {
-        return view('room::index');
+        $guestId = $request->header('X-Guest-ID');
+        $displayName = $request->input('display_name') ?: 'Guest';
+
+        return response()->json($this->roomService->create($guestId, $displayName), 201);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
+    public function show(Request $request, string $code): JsonResponse
     {
-        return view('room::create');
+        $room = $this->roomService->get($code);
+
+        if ($room === null) {
+            return response()->json(['error' => 'Room not found'], 404);
+        }
+
+        return response()->json($room);
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request) {}
-
-    /**
-     * Show the specified resource.
-     */
-    public function show($id)
+    public function join(Request $request, string $code): JsonResponse
     {
-        return view('room::show');
+        $guestId = $request->header('X-Guest-ID');
+        $displayName = $request->input('display_name') ?: 'Guest';
+
+        try {
+            $result = $this->roomService->join($code, $guestId, $displayName);
+        } catch (ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json($result);
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit($id)
+    public function leave(Request $request, string $code): JsonResponse
     {
-        return view('room::edit');
+        $guestId = $request->header('X-Guest-ID');
+
+        $roomId = Room::where('code', $code)->value('id');
+
+        if ($roomId === null) {
+            return response()->json(['error' => 'Room not found'], 404);
+        }
+
+        $this->roomService->leave($roomId, $guestId);
+
+        return response()->json(['ok' => true]);
     }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, $id) {}
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy($id) {}
 }
