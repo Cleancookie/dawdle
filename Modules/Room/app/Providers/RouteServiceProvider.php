@@ -12,6 +12,8 @@ class RouteServiceProvider extends ServiceProvider
     public function boot(): void
     {
         parent::boot();
+
+        Route::aliasMiddleware('guest.id', \Modules\Room\Http\Middleware\ValidateGuestId::class);
     }
 
     public function map(): void

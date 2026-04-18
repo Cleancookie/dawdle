@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
@@ -54,6 +55,7 @@ services:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080", "--debug"]
     ports:
       - "${REVERB_PORT:-8080}:8080"
@@ -84,6 +86,7 @@ services:
     build:
       context: .
       dockerfile: docker/app/Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--timeout=90"]
     volumes:
       - .:/var/www/html
@@ -141,6 +144,7 @@ services:
   # ── Node / Vite dev server ────────────────────────────────────────────────
   node:
     image: node:22-alpine
+    user: "${UID:-1000}:${GID:-1000}"
     working_dir: /var/www/html
     volumes:
       - .:/var/www/html
