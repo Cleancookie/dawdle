@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Redis;
 use Modules\Game\Services\GameService;
 use Modules\Room\Services\RoomService;
 
@@ -80,14 +81,27 @@ class RoomController extends Controller
         }
 
         if ($result['shouldStart']) {
-            $this->gameService->startGame(
-                $result['roomId'],
-                $result['players'],
-                'tic_tac_toe',
-            );
+            $gameType = Redis::hget("dawdle:room:{$result['roomId']}", 'selectedGame') ?: 'tic_tac_toe';
+            $this->gameService->startGame($result['roomId'], $result['players'], $gameType);
         }
 
         return response()->json(['ready' => $result['ready'], 'shouldStart' => $result['shouldStart']]);
+    }
+
+    public function selectGame(Request $request, string $code): JsonResponse
+    {
+        $request->validate(['game_type' => 'required|string|in:tic_tac_toe,pictionary']);
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $this->roomService->selectGame($code, $guestId, $request->input('game_type'));
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 403);
+        }
+
+        return response()->json(['ok' => true]);
     }
 
     public function leave(Request $request, string $code): JsonResponse

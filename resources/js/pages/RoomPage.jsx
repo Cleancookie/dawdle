@@ -4,7 +4,9 @@ import TicTacToeGame from '../games/tic-tac-toe/index.js';
 
 const GAME_MODULES = { tic_tac_toe: TicTacToeGame };
 
-function LobbyView({ members, myGuestId, onReadyToggle, myReady, readySet }) {
+const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary' };
+
+function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
     const [linkCopied, setLinkCopied] = useState(false);
 
     function copyLink() {
@@ -51,6 +53,25 @@ function LobbyView({ members, myGuestId, onReadyToggle, myReady, readySet }) {
             >
                 {myReady ? 'Not Ready' : 'Ready'}
             </button>
+
+            <div>
+                <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Game
+                </label>
+                {isHost ? (
+                    <select
+                        value={selectedGame}
+                        onChange={(e) => onSelectGame(e.target.value)}
+                        className="px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400"
+                    >
+                        {Object.entries(GAME_LABELS).map(([val, label]) => (
+                            <option key={val} value={val}>{label}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <p className="text-sm text-gray-700">{GAME_LABELS[selectedGame] ?? selectedGame}</p>
+                )}
+            </div>
 
             <div>
                 <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -139,6 +160,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [chatSending, setChatSending] = useState(false);
     const [readySet, setReadySet] = useState(new Set());
     const [myReady, setMyReady] = useState(false);
+    const [selectedGame, setSelectedGame] = useState('tic_tac_toe');
     const [phase, setPhase] = useState('lobby');  // 'lobby' | 'playing' | 'score'
     const [gameSession, setGameSession] = useState(null);
     const [scores, setScores] = useState(null);
@@ -169,7 +191,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                         'X-Guest-ID': guest.guestId,
                     },
                     body: JSON.stringify({ display_name: guest.displayName }),
-                }).then((res) => { if (res.ok) setRoom(data); else navigate('/'); });
+                }).then((res) => {
+                    if (res.ok) {
+                        setRoom(data);
+                        setSelectedGame(data.selectedGame ?? 'tic_tac_toe');
+                    } else {
+                        navigate('/');
+                    }
+                });
             })
             .finally(() => setLoading(false));
     }, [roomCode, guest.guestId, navigate]);
@@ -190,6 +219,12 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             });
         });
         return () => channel.stopListening('.room.player_ready');
+    }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.room.game_selected', ({ gameType }) => setSelectedGame(gameType));
+        return () => channel.stopListening('.room.game_selected');
     }, [channel]);
 
     useEffect(() => {
@@ -226,6 +261,15 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    async function handleSelectGame(gameType) {
+        setSelectedGame(gameType);
+        await fetch(`/api/v1/rooms/${roomCode}/game`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Guest-ID': guest.guestId },
+            body: JSON.stringify({ game_type: gameType }),
+        });
+    }
 
     async function handleReadyToggle() {
         const res = await fetch(`/api/v1/rooms/${roomCode}/ready`, {
@@ -375,6 +419,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             onReadyToggle={handleReadyToggle}
                             myReady={myReady}
                             readySet={readySet}
+                            selectedGame={selectedGame}
+                            onSelectGame={handleSelectGame}
                         />
                     )}
                     {phase === 'playing' && gameConfig && (

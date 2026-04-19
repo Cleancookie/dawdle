@@ -37,7 +37,7 @@ class RoomService
             'status', 'waiting',
             'code', $code,
             'hostGuestId', $guestId,
-            'selectedGame', '',
+            'selectedGame', 'tic_tac_toe',
             'lastActivityAt', now()->toISOString(),
         );
         Redis::expire("dawdle:room:{$room->id}", 7200);
@@ -69,11 +69,14 @@ class RoomService
             return null;
         }
 
+        $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: 'tic_tac_toe';
+
         return [
-            'roomId'      => $room->id,
-            'code'        => $room->code,
-            'status'      => $room->status,
-            'hostGuestId' => $room->host_guest_id,
+            'roomId'       => $room->id,
+            'code'         => $room->code,
+            'status'       => $room->status,
+            'hostGuestId'  => $room->host_guest_id,
+            'selectedGame' => $selectedGame,
         ];
     }
 
@@ -182,5 +185,21 @@ class RoomService
         }
 
         return ['ready' => $ready, 'shouldStart' => false];
+    }
+
+    public function selectGame(string $code, string $guestId, string $gameType): void
+    {
+        $room = Room::where('code', $code)->firstOrFail();
+
+        if ($room->host_guest_id !== $guestId) {
+            throw new \InvalidArgumentException('Only the host can select the game');
+        }
+
+        if (!in_array($gameType, ['tic_tac_toe', 'pictionary'], true)) {
+            throw new \InvalidArgumentException('Invalid game type');
+        }
+
+        Redis::hset("dawdle:room:{$room->id}", 'selectedGame', $gameType);
+        broadcast(new \Modules\Room\Events\GameSelected($room->id, $gameType));
     }
 }

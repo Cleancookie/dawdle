@@ -10,4 +10,5 @@ Route::middleware(['guest.id'])->prefix('v1')->group(function () {
     Route::delete('rooms/{code}/leave', [RoomController::class, 'leave']);
     Route::post('rooms/{code}/chat', [RoomController::class, 'chat']);
     Route::post('rooms/{code}/ready', [RoomController::class, 'ready']);
+    Route::patch('rooms/{code}/game', [RoomController::class, 'selectGame']);
 });
