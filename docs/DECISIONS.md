@@ -160,6 +160,7 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 - ✅ Tests the full stack: HTTP, Reverb WebSockets, Redis, MySQL all in one flow
 - ✅ Scenarios are readable English-like steps — easy to understand what's being verified
 - ✅ Can be run by AI sub-agents as a completion signal ("done when `make qa-pict` passes")
+- ✅ `room` and `ttt` scenarios verified green against the live stack (21 and 12 assertions respectively)
 - ✅ `make inspect-room/game/guest` gives instant visibility into live state during debugging
 - ⚠️ Requires the full Docker stack to be running — not a CI-friendly unit test
 - ⚠️ No PHPUnit tests for pure game logic — acceptable for now; add unit tests for `GameLogic` if logic grows complex

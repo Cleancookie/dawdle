@@ -170,10 +170,14 @@ Use the inspector for ad-hoc debugging — e.g., after a scenario fails, inspect
 const client = new VirtualClient('Alice')
 await client.api('POST', '/rooms', { display_name: 'Alice' })  // HTTP with X-Guest-ID header
 await client.connect(roomId)                                    // join Reverb presence channel
-await client.waitForEvent('game.started', 5000)                 // await specific WS event
+await client.waitForEvent('game.started', 5000)                 // await specific WS event (first occurrence)
+await client.waitForEvent('game.started', 5000, client.eventCount())  // await NEXT occurrence (skip already-seen events)
 client.getEvents('ttt.move_made')                               // all received events by name
+client.eventCount()                                             // snapshot for afterIndex
 client.disconnect()                                             // clean up WS connection
 ```
+
+When a scenario triggers the same event type more than once (e.g. two game sessions in one run), snapshot `client.eventCount()` before the second trigger and pass it as the `afterIndex` argument to `waitForEvent`. Without this, `waitForEvent` returns the first matching event it has ever seen.
 
 ### Environment
 

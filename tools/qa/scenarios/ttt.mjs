@@ -56,9 +56,10 @@ export async function run() {
 
         r.step('Wrong-turn move is rejected')
         // Game is over now; start a new one to test turn enforcement
+        const after = alice.eventCount()
         await alice.api('POST', `/rooms/${code}/ready`)
         await bob.api('POST',   `/rooms/${code}/ready`)
-        const started2 = await alice.waitForEvent('game.started', 8_000)
+        const started2 = await alice.waitForEvent('game.started', 8_000, after)
         const { gameId: gameId2, firstTurn: firstTurn2 } = started2
         const notFirst = alice.guestId === firstTurn2 ? bob : alice
         try {

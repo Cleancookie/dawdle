@@ -44,7 +44,8 @@ export class Runner {
         try {
             await fn(this)
         } catch (err) {
-            console.log(`\n  ✗  FATAL: ${err.message}`)
+            const msg = err.message.length > 200 ? err.message.slice(0, 200) + '…' : err.message
+            console.log(`\n  ✗  FATAL: ${msg}`)
             const frame = err.stack?.split('\n')[1]?.trim()
             if (frame) console.log(`       ${frame}`)
             this.failed++

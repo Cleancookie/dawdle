@@ -1,4 +1,4 @@
-import Pusher from 'pusher-js'
+import { Pusher } from 'pusher-js'
 
 const APP_URL     = process.env.QA_APP_URL      ?? 'http://app:8000'
 const REVERB_HOST = process.env.QA_REVERB_HOST  ?? 'reverb'
@@ -74,11 +74,11 @@ export class VirtualClient {
         })
     }
 
-    waitForEvent(name, timeoutMs = 5_000) {
+    waitForEvent(name, timeoutMs = 5_000, afterIndex = 0) {
         const start = Date.now()
         return new Promise((resolve, reject) => {
             const check = () => {
-                const found = this._events.find(e => e.event === name)
+                const found = this._events.slice(afterIndex).find(e => e.event === name)
                 if (found) return resolve(found.data)
                 if (Date.now() - start > timeoutMs) return reject(new Error(`Timeout (${timeoutMs}ms) waiting for: ${name}`))
                 setTimeout(check, 50)
@@ -86,6 +86,8 @@ export class VirtualClient {
             check()
         })
     }
+
+    eventCount() { return this._events.length }
 
     getEvents(name = null) {
         return name ? this._events.filter(e => e.event === name) : [...this._events]
