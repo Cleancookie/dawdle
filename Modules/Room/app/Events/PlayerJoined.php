@@ -28,4 +28,14 @@ class PlayerJoined implements ShouldBroadcastNow
     {
         return 'room.player_joined';
     }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'guestId'       => $this->guestId,
+            'displayName'   => $this->displayName,
+            'role'          => $this->role,
+            'systemMessage' => "{$this->displayName} joined the room",
+        ];
+    }
 }

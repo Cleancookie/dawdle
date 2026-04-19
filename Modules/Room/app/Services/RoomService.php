@@ -149,11 +149,12 @@ class RoomService
         $roomId = Room::where('code', $code)->value('id');
         if (!$roomId) return;
 
+        $displayName = Redis::hget("dawdle:guest:{$guestId}", 'displayName') ?? 'Guest';
         RoomGuest::where('room_id', $roomId)->where('guest_id', $guestId)->update(['left_at' => now()]);
         Redis::hdel("dawdle:guest:{$guestId}", 'roomId', 'role');
         Redis::srem("dawdle:room:{$roomId}:players", $guestId);
         Redis::srem("dawdle:room:{$roomId}:ready", $guestId);
-        broadcast(new PlayerLeft($roomId, $guestId));
+        broadcast(new PlayerLeft($roomId, $guestId, $displayName));
     }
 
     public function toggleReady(string $code, string $guestId): array

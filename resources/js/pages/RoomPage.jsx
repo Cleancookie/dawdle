@@ -172,10 +172,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
     }
 
-    const { members, channel } = useRoom(room?.roomId, guest.guestId, {
-        onJoining: (member) => sysMsg(`${member.displayName} joined the room`),
-        onLeaving: (member) => sysMsg(`${member.displayName} left the room`),
-    });
+    const { members, channel } = useRoom(room?.roomId, guest.guestId);
     const isHost = room?.hostGuestId === guest.guestId;
 
     useEffect(() => {
@@ -218,6 +215,16 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
     useEffect(() => {
         if (!channel) return;
+        const raw = channel.channel;
+        const handler = (_eventName, data) => {
+            if (data?.systemMessage) sysMsg(data.systemMessage);
+        };
+        raw.bind_global(handler);
+        return () => raw.unbind_global(handler);
+    }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
         channel.listen('.room.player_ready', ({ guestId, ready }) => {
             setReadySet((prev) => {
                 const next = new Set(prev);
@@ -232,7 +239,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         if (!channel) return;
         channel.listen('.room.game_selected', ({ gameType }) => {
             setSelectedGame(gameType);
-            sysMsg(`Host changed the game to ${GAME_LABELS[gameType] ?? gameType}`);
         });
         return () => channel.stopListening('.room.game_selected');
     }, [channel]);
@@ -244,7 +250,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             setMyReady(false);
             setReadySet(new Set());
             setGameSession(data);
-            sysMsg(`Game starting — ${GAME_LABELS[data.gameType] ?? data.gameType}!`);
         });
         return () => channel.stopListening('.game.started');
     }, [channel]);

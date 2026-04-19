@@ -26,6 +26,11 @@ class GameSelected implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        return ['gameType' => $this->gameType];
+        $labels = ['tic_tac_toe' => 'Tic Tac Toe', 'pictionary' => 'Pictionary'];
+        $label = $labels[$this->gameType] ?? $this->gameType;
+        return [
+            'gameType'      => $this->gameType,
+            'systemMessage' => "Host changed the game to {$label}",
+        ];
     }
 }

@@ -15,6 +15,7 @@ class PlayerLeft implements ShouldBroadcastNow
     public function __construct(
         public string $roomId,
         public string $guestId,
+        public string $displayName,
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -25,5 +26,14 @@ class PlayerLeft implements ShouldBroadcastNow
     public function broadcastAs(): string
     {
         return 'room.player_left';
+    }
+
+    public function broadcastWith(): array
+    {
+        return [
+            'guestId'       => $this->guestId,
+            'displayName'   => $this->displayName,
+            'systemMessage' => "{$this->displayName} left the room",
+        ];
     }
 }

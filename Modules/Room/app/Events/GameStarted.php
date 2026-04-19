@@ -32,11 +32,14 @@ class GameStarted implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
+        $labels = ['tic_tac_toe' => 'Tic Tac Toe', 'pictionary' => 'Pictionary'];
+        $label = $labels[$this->gameType] ?? $this->gameType;
         return [
-            'gameId'    => $this->gameId,
-            'gameType'  => $this->gameType,
-            'players'   => $this->players,
-            'firstTurn' => $this->firstTurn,
+            'gameId'        => $this->gameId,
+            'gameType'      => $this->gameType,
+            'players'       => $this->players,
+            'firstTurn'     => $this->firstTurn,
+            'systemMessage' => "Game starting — {$label}!",
         ];
     }
 }
