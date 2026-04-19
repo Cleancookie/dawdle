@@ -150,6 +150,23 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 
 ---
 
+## ADR-015 · QA via scenario runner over PHPUnit feature tests
+
+**Status:** Accepted  
+**Date:** 2026-04-19  
+**Context:** Needed a way to verify new features (starting with Pictionary) are correctly implemented end-to-end — HTTP API, WebSocket events, Redis state, and DB state all together. PHPUnit feature tests in Laravel use a null broadcaster (no real WebSocket), meaning they cannot verify that Reverb events fire and are received correctly.  
+**Decision:** Use a Node.js scenario runner (`tools/qa/`) as the primary acceptance mechanism. Scenarios use `VirtualClient` to make real HTTP calls and maintain real WebSocket connections against the running dev stack. The Pictionary scenario defines the full acceptance spec before implementation begins — sub-agents implement against it.  
+**Consequences:**
+- ✅ Tests the full stack: HTTP, Reverb WebSockets, Redis, MySQL all in one flow
+- ✅ Scenarios are readable English-like steps — easy to understand what's being verified
+- ✅ Can be run by AI sub-agents as a completion signal ("done when `make qa-pict` passes")
+- ✅ `make inspect-room/game/guest` gives instant visibility into live state during debugging
+- ⚠️ Requires the full Docker stack to be running — not a CI-friendly unit test
+- ⚠️ No PHPUnit tests for pure game logic — acceptable for now; add unit tests for `GameLogic` if logic grows complex
+- 🔮 PHPUnit unit tests are still appropriate for pure PHP logic (`GameLogic.php`) — add them when the logic is non-trivial enough to warrant it
+
+---
+
 ## ADR-012 · ShouldBroadcastNow over queued ShouldBroadcast
 
 **Status:** Accepted  

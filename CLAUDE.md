@@ -166,3 +166,8 @@ Game starts when all `player`-role guests have `ready: true` (minimum 2). Guests
 4. Add the game type to the `game_sessions.game_type` enum in the migration
 
 No other changes required — the shell and room system are game-agnostic.
+
+# Tool Use
+
+- prefer `jq` to parse json files
+- prefer using commands in the allowlist so less interaction is required

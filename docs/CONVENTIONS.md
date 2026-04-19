@@ -131,6 +131,56 @@ The backend is organised into self-contained modules using [nWidart/laravel-modu
 
 ---
 
+## QA Tooling
+
+New features are verified using a Node.js scenario runner (`tools/qa/`) and an Artisan state inspector. This is the primary verification mechanism — not PHPUnit feature tests. See ADR-015.
+
+### Scenario runner
+
+```bash
+make qa           # run all scenarios
+make qa-room      # room lifecycle only
+make qa-ttt       # TTT full game only
+make qa-pict      # Pictionary full game only
+```
+
+Scenarios live in `tools/qa/scenarios/`. Each scenario:
+- Spins up `VirtualClient` instances (each has a unique guest UUID)
+- Makes real HTTP calls against the running dev stack
+- Connects to Reverb via WebSocket and collects events
+- Asserts on event payloads and API responses
+
+The Pictionary scenario (`scenarios/pictionary.mjs`) acts as the acceptance spec — it defines exactly what must happen for Pictionary to be "done". It will fail until the implementation is complete. Run it with `make qa-pict`.
+
+When adding a new game or feature, write (or extend) the scenario first, then implement.
+
+### State inspector
+
+```bash
+make inspect-room CODE=ABC123   # Redis + DB state for a room
+make inspect-game ID=<ulid>     # Redis game state + DB session + results
+make inspect-guest ID=<uuid>    # Redis guest session hash
+```
+
+Use the inspector for ad-hoc debugging — e.g., after a scenario fails, inspect the room to see what state was left in Redis.
+
+### VirtualClient API
+
+```js
+const client = new VirtualClient('Alice')
+await client.api('POST', '/rooms', { display_name: 'Alice' })  // HTTP with X-Guest-ID header
+await client.connect(roomId)                                    // join Reverb presence channel
+await client.waitForEvent('game.started', 5000)                 // await specific WS event
+client.getEvents('ttt.move_made')                               // all received events by name
+client.disconnect()                                             // clean up WS connection
+```
+
+### Environment
+
+The scripts run inside the `node` Docker container which is on the same Docker network as `app` (port 8000) and `reverb` (port 8080). Override with env vars `QA_APP_URL`, `QA_REVERB_HOST`, `QA_REVERB_PORT`, `QA_REVERB_KEY` to run against a different environment.
+
+---
+
 ## Code Review
 
 Before merging any feature, run the three reviewer profiles defined in `docs/REVIEW_PROFILES.md` as parallel subagents (Quality, Security, Architecture). Fix all **[BLOCK]** findings before committing. See that file for the full process.

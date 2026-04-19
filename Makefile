@@ -1,5 +1,6 @@
 .PHONY: build up down restart logs shell tinker migrate fresh seed test lint \
-        install install-broadcasting npm-install npm-dev npm-build ps
+        install install-broadcasting npm-install npm-dev npm-build ps \
+        qa qa-room qa-ttt qa-pict inspect-room inspect-game inspect-guest
 
 # ── Docker lifecycle ───────────────────────────────────────────────────────
 
@@ -86,3 +87,28 @@ npm-build:
 
 npm:
 	docker compose run --rm node npm $(ARGS)
+
+# ── QA scenario runner ────────────────────────────────────────────────────
+
+qa:
+	docker compose exec node node tools/qa/run.mjs
+
+qa-room:
+	docker compose exec node node tools/qa/run.mjs room
+
+qa-ttt:
+	docker compose exec node node tools/qa/run.mjs ttt
+
+qa-pict:
+	docker compose exec node node tools/qa/run.mjs pictionary
+
+# ── State inspector (Redis + DB) ──────────────────────────────────────────
+
+inspect-room:
+	docker compose exec app php artisan dawdle:inspect room $(CODE)
+
+inspect-game:
+	docker compose exec app php artisan dawdle:inspect game $(ID)
+
+inspect-guest:
+	docker compose exec app php artisan dawdle:inspect guest $(ID)
