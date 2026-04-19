@@ -26,9 +26,10 @@ export default function HomePage({ guest, navigate }) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                     'X-Guest-ID': guest.guestId,
                 },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ display_name: guest.displayName }),
             });
             if (!res.ok) {
                 throw new Error('Request failed');

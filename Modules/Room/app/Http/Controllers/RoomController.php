@@ -6,11 +6,15 @@ use App\Http\Controllers\Controller;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Modules\Game\Services\GameService;
 use Modules\Room\Services\RoomService;
 
 class RoomController extends Controller
 {
-    public function __construct(private RoomService $roomService) {}
+    public function __construct(
+        private RoomService $roomService,
+        private GameService $gameService,
+    ) {}
 
     public function store(Request $request): JsonResponse
     {
@@ -73,6 +77,14 @@ class RoomController extends Controller
             $result = $this->roomService->toggleReady($code, $guestId);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
             return response()->json(['error' => 'Room not found'], 404);
+        }
+
+        if ($result['shouldStart']) {
+            $this->gameService->startGame(
+                $result['roomId'],
+                $result['players'],
+                'tic_tac_toe',
+            );
         }
 
         return response()->json(['ready' => $result['ready'], 'shouldStart' => $result['shouldStart']]);

@@ -1,6 +1,6 @@
 <?php
 
-namespace Modules\Room\Events;
+namespace Modules\Game\Events;
 
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PresenceChannel;
@@ -8,14 +8,15 @@ use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class PlayerReady implements ShouldBroadcastNow
+class GameEnded implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public string $roomId,
-        public string $guestId,
-        public bool $ready,
+        public string $gameId,
+        public array $scores,
+        public ?string $winner,
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -25,11 +26,15 @@ class PlayerReady implements ShouldBroadcastNow
 
     public function broadcastAs(): string
     {
-        return 'room.player_ready';
+        return 'game.ended';
     }
 
     public function broadcastWith(): array
     {
-        return ['guestId' => $this->guestId, 'ready' => $this->ready];
+        return [
+            'gameId'  => $this->gameId,
+            'scores'  => $this->scores,
+            'winner'  => $this->winner,
+        ];
     }
 }

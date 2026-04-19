@@ -3,54 +3,38 @@
 namespace Modules\Game\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Modules\Game\Services\GameService;
 
 class GameController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    public function __construct(private GameService $gameService) {}
+
+    public function move(Request $request, string $gameId): JsonResponse
     {
-        return view('game::index');
+        $validated = $request->validate(['index' => 'required|integer|min:0|max:8']);
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $state = $this->gameService->applyMove($gameId, $guestId, $validated);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 404);
+        }
+
+        return response()->json($state);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
+    public function state(Request $request, string $gameId): JsonResponse
     {
-        return view('game::create');
+        $state = $this->gameService->getState($gameId);
+
+        if ($state === null) {
+            return response()->json(['error' => 'Game not found'], 404);
+        }
+
+        return response()->json($state);
     }
-
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request) {}
-
-    /**
-     * Show the specified resource.
-     */
-    public function show($id)
-    {
-        return view('game::show');
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit($id)
-    {
-        return view('game::edit');
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, $id) {}
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy($id) {}
 }

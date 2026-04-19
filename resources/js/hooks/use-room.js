@@ -22,7 +22,7 @@ function getEcho(guestId) {
         forceTLS: false,
         enabledTransports: ['ws', 'wss'],
         auth: {
-            headers: { 'X-Guest-ID': guestId },
+            headers: { 'X-Guest-ID': guestId, 'Accept': 'application/json' },
         },
     });
     echoGuestId = guestId;

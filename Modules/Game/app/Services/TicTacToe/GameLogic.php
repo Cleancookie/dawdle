@@ -10,10 +10,11 @@ class GameLogic
         [0, 4, 8], [2, 4, 6],             // diagonals
     ];
 
-    public static function initialState(string $gameId, string $playerX, string $playerO): array
+    public static function initialState(string $gameId, string $roomId, string $playerX, string $playerO): array
     {
         return [
             'gameId'      => $gameId,
+            'roomId'      => $roomId,
             'gameType'    => 'tic_tac_toe',
             'board'       => array_fill(0, 9, null),
             'players'     => ['X' => $playerX, 'O' => $playerO],

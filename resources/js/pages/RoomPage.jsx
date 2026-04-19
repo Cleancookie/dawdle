@@ -1,7 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useRoom } from '../hooks/use-room';
+import TicTacToeGame from '../games/tic-tac-toe/index.js';
 
-function LobbyView({ roomCode, members, myGuestId, isHost, onReadyToggle, myReady, readySet }) {
+const GAME_MODULES = { tic_tac_toe: TicTacToeGame };
+
+function LobbyView({ members, myGuestId, onReadyToggle, myReady, readySet }) {
     const [linkCopied, setLinkCopied] = useState(false);
 
     function copyLink() {
@@ -49,19 +52,6 @@ function LobbyView({ roomCode, members, myGuestId, isHost, onReadyToggle, myRead
                 {myReady ? 'Not Ready' : 'Ready'}
             </button>
 
-            {isHost && (
-                <div>
-                    <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                        Game
-                    </label>
-                    {/* TODO: wire selected game to backend */}
-                    <select className="px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400">
-                        <option value="tic_tac_toe">Tic Tac Toe</option>
-                        <option value="pictionary">Pictionary</option>
-                    </select>
-                </div>
-            )}
-
             <div>
                 <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
                     Invite Link
@@ -84,47 +74,109 @@ function LobbyView({ roomCode, members, myGuestId, isHost, onReadyToggle, myRead
     );
 }
 
+function GameArea({ gameType, gameConfig, onMove, onComplete, gameRef }) {
+    const containerRef = useRef(null);
+
+    useLayoutEffect(() => {
+        const GameClass = GAME_MODULES[gameType];
+        if (!GameClass || !containerRef.current) return;
+
+        const game = new GameClass(containerRef.current, gameConfig);
+        game.on('move', onMove);
+        game.on('complete', onComplete);
+        gameRef.current = game;
+
+        return () => {
+            game.destroy();
+            gameRef.current = null;
+        };
+    }, [gameConfig.gameId]);
+
+    return <div ref={containerRef} className="w-full h-full" />;
+}
+
+function ScoreScreen({ scores, members, myGuestId, onPlayAgain }) {
+    const sorted = [...scores].sort((a, b) => b.score - a.score);
+
+    function displayName(guestId) {
+        const m = members.find((m) => m.id === guestId);
+        return m?.displayName ?? guestId.slice(0, 8);
+    }
+
+    return (
+        <div className="p-6 flex flex-col gap-6 items-center">
+            <h2 className="text-xl font-bold text-gray-800">Game Over</h2>
+            <ul className="flex flex-col gap-3 w-full max-w-xs">
+                {sorted.map((s, i) => (
+                    <li key={s.guestId} className="flex items-center justify-between px-4 py-3 rounded bg-white border border-gray-200">
+                        <span className="flex items-center gap-3 text-sm text-gray-800">
+                            <span className="text-gray-400 font-mono w-4">{i + 1}.</span>
+                            <span className={s.guestId === myGuestId ? 'font-semibold' : ''}>
+                                {displayName(s.guestId)}
+                            </span>
+                        </span>
+                        <span className="text-sm font-medium text-gray-600">
+                            {s.score > 0 ? 'Win' : 'Loss'}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+            <button
+                onClick={onPlayAgain}
+                className="px-6 py-2 rounded bg-gray-800 text-white font-medium text-sm hover:bg-gray-700 transition-colors"
+            >
+                Play Again
+            </button>
+        </div>
+    );
+}
+
 export default function RoomPage({ guest, roomCode, navigate }) {
     const [room, setRoom] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [copied, setCopied] = useState(false);
     const [messages, setMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [chatSending, setChatSending] = useState(false);
     const [readySet, setReadySet] = useState(new Set());
     const [myReady, setMyReady] = useState(false);
+    const [phase, setPhase] = useState('lobby');  // 'lobby' | 'playing' | 'score'
+    const [gameSession, setGameSession] = useState(null);
+    const [scores, setScores] = useState(null);
     const messagesEndRef = useRef(null);
+    const gameRef = useRef(null);
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
-
-    // TODO: use room?.hostGuestId once the room API returns it
     const isHost = room?.hostGuestId === guest.guestId;
 
     useEffect(() => {
+        if (!guest.displayName) { navigate('/'); return; }
+
         fetch(`/api/v1/rooms/${roomCode}`, {
-            headers: { 'X-Guest-ID': guest.guestId },
+            headers: { 'X-Guest-ID': guest.guestId, 'Accept': 'application/json' },
         })
             .then((res) => {
-                if (res.status === 404) {
-                    navigate('/');
-                    return null;
-                }
+                if (res.status === 404) { navigate('/'); return null; }
                 return res.json();
             })
             .then((data) => {
-                if (data) setRoom(data);
+                if (!data) return;
+                return fetch(`/api/v1/rooms/${roomCode}/join`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Guest-ID': guest.guestId,
+                    },
+                    body: JSON.stringify({ display_name: guest.displayName }),
+                }).then((res) => { if (res.ok) setRoom(data); else navigate('/'); });
             })
             .finally(() => setLoading(false));
     }, [roomCode, guest.guestId, navigate]);
 
     useEffect(() => {
         if (!channel) return;
-        channel.listen('.chat.message', (data) => {
-            setMessages((prev) => [...prev, data]);
-        });
-        return () => {
-            channel.stopListening('.chat.message');
-        };
+        channel.listen('.chat.message', (data) => setMessages((prev) => [...prev, data]));
+        return () => channel.stopListening('.chat.message');
     }, [channel]);
 
     useEffect(() => {
@@ -138,6 +190,37 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         });
         return () => channel.stopListening('.room.player_ready');
     }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.game.started', (data) => {
+            setPhase('playing');
+            setMyReady(false);
+            setReadySet(new Set());
+            setGameSession(data);
+        });
+        return () => channel.stopListening('.game.started');
+    }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.game.ended', (data) => {
+            setPhase('score');
+            setScores(data.scores);
+            setGameSession(null);
+            setMyReady(false);
+            setReadySet(new Set());
+        });
+        return () => channel.stopListening('.game.ended');
+    }, [channel]);
+
+    useEffect(() => {
+        if (!channel || phase !== 'playing') return;
+        channel.listen('.ttt.move_made', (data) => {
+            gameRef.current?.receiveEvent('ttt.move_made', data);
+        });
+        return () => channel.stopListening('.ttt.move_made');
+    }, [channel, phase]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -159,6 +242,28 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         }
     }
 
+    async function handleMove(moveData) {
+        await fetch(`/api/v1/games/${gameSession.gameId}/move`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Guest-ID': guest.guestId,
+                ...(window.Echo?.socketId() ? { 'X-Socket-ID': window.Echo.socketId() } : {}),
+            },
+            body: JSON.stringify({ index: moveData.index }),
+        });
+    }
+
+    function handleComplete() {
+        // game.ended from server is the canonical trigger; this is a secondary signal
+    }
+
+    function handlePlayAgain() {
+        setPhase('lobby');
+        setScores(null);
+    }
+
     async function sendChat() {
         const text = chatInput.trim();
         if (!text || !room || chatSending) return;
@@ -176,61 +281,78 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                     'X-Guest-ID': guest.guestId,
+                    ...(window.Echo?.socketId() ? { 'X-Socket-ID': window.Echo.socketId() } : {}),
                 },
                 body: JSON.stringify({ message: text }),
             });
         } catch {
-            // message already shown optimistically; silent fail is acceptable for chat
+            // optimistic update stays; silent fail acceptable for chat
         } finally {
             setChatSending(false);
         }
     }
 
-    function copyInviteLink() {
-        navigator.clipboard.writeText(window.location.href);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    }
-
     function leave() {
-        if (!room) {
-            navigate('/');
-            return;
-        }
+        if (!room) { navigate('/'); return; }
         fetch(`/api/v1/rooms/${roomCode}/leave`, {
             method: 'DELETE',
             headers: { 'X-Guest-ID': guest.guestId },
         }).finally(() => navigate('/'));
     }
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center h-screen text-gray-500">
-                Loading...
-            </div>
-        );
+    function buildGameConfig() {
+        if (!gameSession) return null;
+        const { gameId, gameType, players: gamePlayers, firstTurn } = gameSession;
+        const playerIds = gamePlayers.map((p) => p.guestId);
+
+        const mappedPlayers = gamePlayers.map((p) => {
+            const m = members.find((m) => m.id === p.guestId);
+            return { guestId: p.guestId, displayName: m?.displayName ?? p.guestId.slice(0, 8), isMe: p.guestId === guest.guestId };
+        });
+
+        const spectatorList = members
+            .filter((m) => !playerIds.includes(m.id))
+            .map((m) => ({ guestId: m.id, displayName: m.displayName }));
+
+        return {
+            roomId: room?.roomId,
+            gameId,
+            guestId: guest.guestId,
+            players: mappedPlayers,
+            spectators: spectatorList,
+            role: playerIds.includes(guest.guestId) ? 'player' : 'spectator',
+            gameType,
+            gameState: {
+                board: Array(9).fill(null),
+                players: {
+                    X: firstTurn,
+                    O: gamePlayers.find((p) => p.guestId !== firstTurn)?.guestId,
+                },
+                currentTurn: firstTurn,
+                status: 'playing',
+            },
+        };
     }
+
+    if (loading) {
+        return <div className="flex items-center justify-center h-screen text-gray-500">Loading...</div>;
+    }
+
+    const gameConfig = phase === 'playing' ? buildGameConfig() : null;
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
             {/* Header */}
             <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shrink-0">
                 <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-lg tracking-widest text-gray-800">
-                        {roomCode}
-                    </span>
+                    <span className="font-mono font-bold text-lg tracking-widest text-gray-800">{roomCode}</span>
                     {members.length > 0 && (
                         <span className="text-sm text-gray-500">
                             {members.length} {members.length === 1 ? 'player' : 'players'}
                         </span>
                     )}
-                    <button
-                        onClick={copyInviteLink}
-                        className="px-3 py-1 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
-                    >
-                        {copied ? 'Copied!' : 'Copy invite link'}
-                    </button>
                 </div>
                 <button
                     onClick={leave}
@@ -244,16 +366,33 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             <div className="flex flex-1 overflow-hidden">
                 {/* Game area */}
                 <main className="flex-[7] overflow-y-auto border-r border-gray-200">
-                    <LobbyView
-                        roomCode={roomCode}
-                        members={members}
-                        myGuestId={guest.guestId}
-                        channel={channel}
-                        isHost={isHost}
-                        onReadyToggle={handleReadyToggle}
-                        myReady={myReady}
-                        readySet={readySet}
-                    />
+                    {phase === 'lobby' && (
+                        <LobbyView
+                            members={members}
+                            myGuestId={guest.guestId}
+                            isHost={isHost}
+                            onReadyToggle={handleReadyToggle}
+                            myReady={myReady}
+                            readySet={readySet}
+                        />
+                    )}
+                    {phase === 'playing' && gameConfig && (
+                        <GameArea
+                            gameType={gameSession.gameType}
+                            gameConfig={gameConfig}
+                            onMove={handleMove}
+                            onComplete={handleComplete}
+                            gameRef={gameRef}
+                        />
+                    )}
+                    {phase === 'score' && scores && (
+                        <ScoreScreen
+                            scores={scores}
+                            members={members}
+                            myGuestId={guest.guestId}
+                            onPlayAgain={handlePlayAgain}
+                        />
+                    )}
                 </main>
 
                 {/* Chat sidebar */}

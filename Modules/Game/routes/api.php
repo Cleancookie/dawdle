@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use Modules\Game\Http\Controllers\GameController;
 
-Route::prefix('v1')->group(function () {
-    Route::apiResource('games', GameController::class)->names('game');
+Route::middleware(['guest.id'])->prefix('v1')->group(function () {
+    Route::post('games/{gameId}/move', [GameController::class, 'move']);
+    Route::get('games/{gameId}/state', [GameController::class, 'state']);
 });
