@@ -25,6 +25,7 @@ function getEcho(guestId) {
             headers: { 'X-Guest-ID': guestId, 'Accept': 'application/json' },
         },
     });
+    window.Echo = echoInstance;
     echoGuestId = guestId;
     return echoInstance;
 }
