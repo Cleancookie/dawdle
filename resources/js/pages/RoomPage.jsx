@@ -292,7 +292,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             // optimistic update stays; silent fail acceptable for chat
         } finally {
             setChatSending(false);
-            setTimeout(() => chatInputRef.current?.focus(), 0);
         }
     }
 
@@ -419,13 +418,13 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             value={chatInput}
                             onChange={(e) => setChatInput(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-                            disabled={chatSending || !room}
+                            disabled={!room}
                             placeholder="Say something..."
                             className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
                         />
                         <button
                             onClick={sendChat}
-                            disabled={chatSending || !room}
+                            disabled={!room}
                             className="px-3 py-2 text-sm rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             Send
