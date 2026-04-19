@@ -277,7 +277,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         };
         setChatInput('');
         setMessages((prev) => [...prev, optimistic]);
-        chatInputRef.current?.focus();
         try {
             await fetch(`/api/v1/rooms/${roomCode}/chat`, {
                 method: 'POST',
@@ -293,6 +292,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             // optimistic update stays; silent fail acceptable for chat
         } finally {
             setChatSending(false);
+            setTimeout(() => chatInputRef.current?.focus(), 0);
         }
     }
 
