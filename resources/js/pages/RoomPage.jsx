@@ -143,6 +143,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [gameSession, setGameSession] = useState(null);
     const [scores, setScores] = useState(null);
     const messagesEndRef = useRef(null);
+    const chatInputRef = useRef(null);
     const gameRef = useRef(null);
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
@@ -276,6 +277,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         };
         setChatInput('');
         setMessages((prev) => [...prev, optimistic]);
+        chatInputRef.current?.focus();
         try {
             await fetch(`/api/v1/rooms/${roomCode}/chat`, {
                 method: 'POST',
@@ -412,6 +414,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                     </div>
                     <div className="p-3 border-t border-gray-200 flex gap-2">
                         <input
+                            ref={chatInputRef}
                             type="text"
                             value={chatInput}
                             onChange={(e) => setChatInput(e.target.value)}
