@@ -150,6 +150,50 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 
 ---
 
+## ADR-012 · ShouldBroadcastNow over queued ShouldBroadcast
+
+**Status:** Accepted  
+**Date:** 2026-04-19  
+**Context:** Events implementing `ShouldBroadcast` are pushed onto a queue and fired by the queue worker. During development, the queue worker was running but without the correct Reverb broadcasting configuration, meaning events were queued and silently lost. The `game.ended` event was never received by clients until this was diagnosed.  
+**Decision:** All game and room events implement `ShouldBroadcastNow`. This fires the broadcast synchronously within the HTTP request cycle — no queue dependency.  
+**Consequences:**
+- ✅ Broadcasts fire immediately and predictably; no silent failures from misconfigured queue workers
+- ✅ Easier to reason about in development (event fires when the HTTP call returns)
+- ⚠️ Synchronous broadcast adds latency to the HTTP response — acceptable for the low-frequency events in Dawdle (game moves, ready toggling, chat)
+- ⚠️ Under heavy load, async queued broadcasts would be better — revisit if move broadcast latency becomes measurable
+- 🔮 If we ever need deferred broadcasting (e.g. scheduled events), use a dedicated artisan command rather than re-introducing `ShouldBroadcast`
+
+---
+
+## ADR-013 · Server-driven system messages via `systemMessage` field + `bind_global`
+
+**Status:** Accepted  
+**Date:** 2026-04-19  
+**Context:** System messages (join, leave, game start, game change) were initially constructed client-side as strings inside individual event listeners. This meant the client had to know the human-readable label for every event type, and adding a new event type required both a backend change and a matching client-side string.  
+**Decision:** Events that should produce a chat system message include a `systemMessage: string` field in their `broadcastWith()` payload. The frontend has a single `bind_global` handler on the raw Pusher channel; if `data.systemMessage` exists, it is added to chat. Events that should not produce a message simply omit the field.  
+**Consequences:**
+- ✅ Adding a new system message requires only a backend change — no frontend wiring
+- ✅ Message text is co-located with the event definition, not scattered across React components
+- ✅ Single point of interception handles all current and future event types
+- ⚠️ `systemMessage` strings are not localisation-ready (hardcoded English in PHP) — acceptable for v1
+- ⚠️ `bind_global` also fires for internal Pusher protocol events (`pusher:subscription_succeeded`, `pusher:member_added`, etc.) — the `if (data?.systemMessage)` guard is sufficient to filter these
+
+---
+
+## ADR-014 · Host concept — first creator is room host; persisted in DB and Redis
+
+**Status:** Accepted  
+**Date:** 2026-04-19  
+**Context:** The lobby needed a way to designate one player as having privileged control (game selection). The simplest model is that the room creator is the host.  
+**Decision:** `rooms.host_guest_id` stores the host UUID in MySQL. `dawdle:room:{roomId}` Redis hash stores `hostGuestId` for fast reads. The host is set at room creation and currently never changes (host handover is out of scope for v1). The host is the only player who can call `PATCH /rooms/{code}/game`.  
+**Consequences:**
+- ✅ Simple and deterministic — whoever created the room is in charge
+- ✅ Host identity is available on the initial `GET /rooms/{code}` response without a separate query
+- ⚠️ If the host disconnects, no one can change the game — acceptable for v1
+- 🔮 Host handover: when implemented, update both `rooms.host_guest_id` and `dawdle:room:{roomId}.hostGuestId` atomically; broadcast a `room.host_changed` event
+
+---
+
 ## ADR-010 · Decisions and opinions are logged as ADRs
 
 **Status:** Accepted  

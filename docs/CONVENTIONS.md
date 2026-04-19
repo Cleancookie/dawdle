@@ -81,6 +81,23 @@ The backend is organised into self-contained modules using [nWidart/laravel-modu
 - Never read live game state from MySQL during an active game — Redis is the source of truth during play.
 - All Redis keys are prefixed `dawdle:` — see `docs/SPEC.md §12` for the full schema.
 
+**Redis vs Cache facade:**
+
+- **TODO:** Prefer `Cache::` / `cache()` over `Redis::` for simple key-value storage — `cache()->put(key, value, $ttl)`, `cache()->get(key)`, `cache()->forget(key)`. These work with any cache driver and are more testable.
+- **Use `Redis::` directly** when you need Redis-specific data structures: sets (`sadd`/`smembers`/`srem`/`sismember`), hashes (`hset`/`hget`/`hgetall`/`hdel`), sorted sets, or atomic multi-key operations. The `Cache` facade does not expose these.
+- In practice, most Dawdle Redis usage requires `Redis::` (hashes for room/guest state, sets for players/ready). The clearest candidates for migration are `Redis::del()` → `Cache::forget()` and any isolated `Redis::set()`/`Redis::get()` calls.
+
+**Broadcasting:**
+
+- Always use `ShouldBroadcastNow` (not `ShouldBroadcast`) for game and room events — `ShouldBroadcast` queues the event and requires a running queue worker with Reverb configuration. `ShouldBroadcastNow` fires synchronously within the HTTP request. See ADR-012.
+- `toOthers()` requires two things: the `X-Socket-ID` header on the HTTP request, AND `window.Echo` must be set to the Echo instance (not just a module-local variable). The `use-room.js` hook assigns `window.Echo = echoInstance` for this reason.
+- `broadcast(new Event())->toOthers()` — use this on events sent from a client action where the sender already applied the change optimistically (e.g. chat messages).
+- `broadcast(new Event())` — no `toOthers()` — use this for system events where all clients (including the triggering client) need the update (e.g. `GameStarted`, `PlayerLeft`).
+
+**Models:**
+
+- Models using `HasUlids` auto-generate their ID in the `creating` Eloquent event. If you pass `id` to `Model::create([...])` but `id` is not in `$fillable`, the ID is silently dropped and a new one is generated. Use `Model::forceCreate([...])` when you need to supply your own ID (e.g. the game session ID that was already stored in Redis).
+
 **Migrations:**
 - Each module owns its migrations in `Modules/{Name}/Database/Migrations/`
 - Use ULIDs (not auto-increment integers) for primary keys on `rooms` and `game_sessions` — these IDs are exposed in URLs and WebSocket payloads.
@@ -109,6 +126,8 @@ The backend is organised into self-contained modules using [nWidart/laravel-modu
 - All events are namespaced `{category}.{action}` — e.g. `room.player_joined`, `ttt.move_made`.
 - Game-specific events are prefixed with the game type abbreviation: `ttt.*`, `pict.*`.
 - Never broadcast raw user input — always validate server-side before broadcasting.
+- To handle all events generically (e.g. system messages), use `channel.channel.bind_global(handler)` on the underlying raw Pusher channel object. `channel.channel` is the Pusher-js `Channel` instance that Echo wraps. Always unbind in the cleanup: `channel.channel.unbind_global(handler)`.
+- Events that should produce a chat system message include a `systemMessage: string` field in their payload — the generic `bind_global` handler picks this up without any per-event wiring. See ADR-013 and `docs/SPEC.md §8`.
 
 ---
 

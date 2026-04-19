@@ -397,20 +397,24 @@ Broadcast::channel('room.{roomId}', function ($guest, $roomId) {
 
 All events are namespaced `{category}.{action}`.
 
+#### System Message Convention
+
+Any event may include an optional `systemMessage: string` field in its payload. When present, the shell renders it as a grey italic line in the chat sidebar — no client-side string construction required. The `bind_global` handler on the raw Pusher channel intercepts every event and checks for this field. Events that should not produce a chat notice simply omit the field.
+
 #### Room Events (broadcast to all)
 
 | Event | Payload | Description |
 |---|---|---|
-| `room.player_joined` | `{ guestId, displayName, role }` | New participant joined |
-| `room.player_left` | `{ guestId }` | Participant disconnected |
+| `room.player_joined` | `{ guestId, displayName, role, systemMessage }` | New participant joined |
+| `room.player_left` | `{ guestId, displayName, systemMessage }` | Participant disconnected |
 | `room.player_ready` | `{ guestId, ready }` | Ready state changed |
-| `room.game_selected` | `{ gameType }` | Host changed selected game |
+| `room.game_selected` | `{ gameType, systemMessage }` | Host changed selected game |
 
 #### Game Lifecycle Events
 
 | Event | Payload | Description |
 |---|---|---|
-| `game.started` | `{ gameId, gameType, players[], firstTurn }` | Game starting; shell mounts game module |
+| `game.started` | `{ gameId, gameType, players[], firstTurn, systemMessage }` | Game starting; shell mounts game module |
 | `game.state_update` | `{ gameId, state }` | Full state sync (used on reconnect) |
 | `game.ended` | `{ gameId, scores[], winner }` | Game over; shell shows score screen |
 
@@ -443,6 +447,7 @@ Two players. 3×3 grid. Classic rules. Spectators watch in real time.
 ```json
 {
   "gameId":      "uuid",
+  "roomId":      "uuid",
   "gameType":    "tic_tac_toe",
   "board":       [null, null, null, null, null, null, null, null, null],
   "players":     { "X": "guestId-1", "O": "guestId-2" },
@@ -451,6 +456,8 @@ Two players. 3×3 grid. Classic rules. Spectators watch in real time.
   "winner":      null
 }
 ```
+
+`roomId` is stored in game state so `endGame` can clear the ready set and reset room status without an extra DB lookup.
 
 `board` is a 9-element array. Index 0 = top-left, 8 = bottom-right. Values: `null | "X" | "O"`.
 
