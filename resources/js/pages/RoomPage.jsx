@@ -168,7 +168,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const chatInputRef = useRef(null);
     const gameRef = useRef(null);
 
-    const { members, channel } = useRoom(room?.roomId, guest.guestId);
+    function sysMsg(text) {
+        setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
+    }
+
+    const { members, channel } = useRoom(room?.roomId, guest.guestId, {
+        onJoining: (member) => sysMsg(`${member.displayName} joined the room`),
+        onLeaving: (member) => sysMsg(`${member.displayName} left the room`),
+    });
     const isHost = room?.hostGuestId === guest.guestId;
 
     useEffect(() => {
@@ -223,7 +230,10 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
     useEffect(() => {
         if (!channel) return;
-        channel.listen('.room.game_selected', ({ gameType }) => setSelectedGame(gameType));
+        channel.listen('.room.game_selected', ({ gameType }) => {
+            setSelectedGame(gameType);
+            sysMsg(`Host changed the game to ${GAME_LABELS[gameType] ?? gameType}`);
+        });
         return () => channel.stopListening('.room.game_selected');
     }, [channel]);
 
@@ -234,6 +244,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             setMyReady(false);
             setReadySet(new Set());
             setGameSession(data);
+            sysMsg(`Game starting — ${GAME_LABELS[data.gameType] ?? data.gameType}!`);
         });
         return () => channel.stopListening('.game.started');
     }, [channel]);
@@ -448,12 +459,18 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                         {messages.length === 0 ? (
                             <p className="text-gray-400 italic">No messages yet.</p>
                         ) : (
-                            messages.map((msg, i) => (
-                                <div key={`${msg.timestamp}-${msg.guestId}-${i}`} className="mb-2">
-                                    <span className="font-semibold text-gray-700">{msg.displayName}</span>
-                                    <span className="text-gray-600"> {msg.message}</span>
-                                </div>
-                            ))
+                            messages.map((msg, i) =>
+                                msg.system ? (
+                                    <div key={`sys-${msg.timestamp}-${i}`} className="mb-2 text-xs text-gray-400 italic">
+                                        {msg.text}
+                                    </div>
+                                ) : (
+                                    <div key={`${msg.timestamp}-${msg.guestId}-${i}`} className="mb-2">
+                                        <span className="font-semibold text-gray-700">{msg.displayName}</span>
+                                        <span className="text-gray-600"> {msg.message}</span>
+                                    </div>
+                                )
+                            )
                         )}
                         <div ref={messagesEndRef} />
                     </div>

@@ -30,7 +30,7 @@ function getEcho(guestId) {
     return echoInstance;
 }
 
-export function useRoom(roomId, guestId) {
+export function useRoom(roomId, guestId, { onJoining, onLeaving } = {}) {
     const [members, setMembers] = useState([]);
     const [channel, setChannel] = useState(null);
 
@@ -42,8 +42,14 @@ export function useRoom(roomId, guestId) {
 
         const ch = instance.join(channelName)
             .here((here) => setMembers(here))
-            .joining((member) => setMembers((prev) => [...prev, member]))
-            .leaving((member) => setMembers((prev) => prev.filter((m) => m.id !== member.id)));
+            .joining((member) => {
+                setMembers((prev) => [...prev, member]);
+                onJoining?.(member);
+            })
+            .leaving((member) => {
+                setMembers((prev) => prev.filter((m) => m.id !== member.id));
+                onLeaving?.(member);
+            });
 
         setChannel(ch);
 
