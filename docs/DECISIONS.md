@@ -4,6 +4,32 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 
 ---
 
+## ADR-016 · Pictionary stroke protocol: single event instead of start/delta/end
+
+**Status:** Accepted
+**Date:** 2026-04-21
+**Context:** SPEC.md §10 defines three stroke events (`pict.stroke_start`, `pict.stroke_delta`, `pict.stroke_end`) to support streaming strokes while drawing. Implementation uses a single `pict.stroke` event sent on pointer-up with the complete stroke.
+**Decision:** Use a single `pict.stroke` event containing the full points array. The game module buffers all pointer events locally and emits the completed stroke on mouse/touch up. This matches how perfect-freehand works (full stroke needed for smooth path interpolation).
+**Consequences:**
+- ✅ Simpler backend and frontend — one event type, one handler
+- ✅ Correct with perfect-freehand (needs all points to compute outline)
+- ⚠️ Guessers see strokes appear all at once (on lift) rather than streaming — acceptable for v1
+- 🔮 If streaming is needed, implement delta buffering in the frontend and keep the single backend event type
+
+## ADR-017 · Pictionary word delivery: HTTP pull instead of private channel push
+
+**Status:** Accepted
+**Date:** 2026-04-21
+**Context:** The word must be sent only to the drawer, not all presence channel members. A private channel push approach was attempted but has an unsolvable timing race: the server broadcasts `pict.word_hint` synchronously in the same request as `pict.round_started`, before the client can subscribe to the private channel.
+**Decision:** Word delivery is pull-based. The drawer calls `GET /games/{gameId}/word` after receiving `pict.round_started` with themselves as drawer. The endpoint returns 403 to non-drawers.
+**Consequences:**
+- ✅ No timing race — the drawer fetches the word at any point after round starts
+- ✅ Simpler than managing per-player private channel subscriptions in the shell
+- ✅ Naturally re-fetchable if the client reconnects mid-round
+- ⚠️ Adds one HTTP round-trip per round for the drawer
+
+---
+
 ## ADR-001 · Single Laravel monolith over microservices (v1)
 
 **Status:** Accepted  
