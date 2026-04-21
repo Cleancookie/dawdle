@@ -13,11 +13,14 @@ class GameController extends Controller
 
     public function move(Request $request, string $gameId): JsonResponse
     {
-        $validated = $request->validate(['index' => 'required|integer|min:0|max:8']);
+        $request->validate(['type' => 'sometimes|string']);
         $guestId = $request->header('X-Guest-ID');
+        $moveData = $request->all();
 
         try {
-            $state = $this->gameService->applyMove($gameId, $guestId, $validated);
+            $state = $this->gameService->applyMove($gameId, $guestId, $moveData);
+        } catch (\DomainException $e) {
+            return response()->json(['error' => $e->getMessage()], 403);
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         } catch (\RuntimeException $e) {

@@ -126,7 +126,7 @@ The backend is organised into self-contained modules using [nWidart/laravel-modu
 - All events are namespaced `{category}.{action}` — e.g. `room.player_joined`, `ttt.move_made`.
 - Game-specific events are prefixed with the game type abbreviation: `ttt.*`, `pict.*`.
 - Never broadcast raw user input — always validate server-side before broadcasting.
-- To handle all events generically (e.g. system messages), use `channel.channel.bind_global(handler)` on the underlying raw Pusher channel object. `channel.channel` is the Pusher-js `Channel` instance that Echo wraps. Always unbind in the cleanup: `channel.channel.unbind_global(handler)`.
+- To handle all events generically (e.g. system messages), use `channel.subscription.bind_global(handler)` on the underlying raw Pusher channel object. `channel.subscription` is the Pusher-js `Channel` instance that Echo 2.x wraps (note: Echo 1.x used `channel.channel` — that no longer exists). Always unbind in the cleanup: `channel.subscription.unbind_global(handler)`.
 - Events that should produce a chat system message include a `systemMessage: string` field in their payload — the generic `bind_global` handler picks this up without any per-event wiring. See ADR-013 and `docs/SPEC.md §8`.
 
 ---

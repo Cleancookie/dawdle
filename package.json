@@ -17,6 +17,7 @@
     "dependencies": {
         "@vitejs/plugin-react": "^6.0.1",
         "laravel-echo": "^2.3.4",
+        "perfect-freehand": "^1.2.2",
         "phaser": "^4.0.0",
         "pusher-js": "^8.5.0",
         "react": "^19.2.5",

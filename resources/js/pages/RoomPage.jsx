@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useRoom } from '../hooks/use-room';
 import TicTacToeGame from '../games/tic-tac-toe/index.js';
+import PictionaryGame from '../games/pictionary/index.jsx';
 
-const GAME_MODULES = { tic_tac_toe: TicTacToeGame };
+const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame };
 
 const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary' };
 
@@ -215,7 +216,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
     useEffect(() => {
         if (!channel) return;
-        const raw = channel.channel;
+        const raw = channel.subscription;
         const handler = (_eventName, data) => {
             if (data?.systemMessage) sysMsg(data.systemMessage);
         };
@@ -275,6 +276,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     }, [channel, phase]);
 
     useEffect(() => {
+        if (!channel || phase !== 'playing') return;
+        const fwd = (name) => (data) => gameRef.current?.receiveEvent(name, data);
+        const pictEvents = ['pict.round_started', 'pict.stroke', 'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended'];
+        pictEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
+        return () => pictEvents.forEach((e) => channel.stopListening('.' + e));
+    }, [channel, phase]);
+
+    useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
@@ -312,7 +321,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 'X-Guest-ID': guest.guestId,
                 ...(window.Echo?.socketId() ? { 'X-Socket-ID': window.Echo.socketId() } : {}),
             },
-            body: JSON.stringify({ index: moveData.index }),
+            body: JSON.stringify(moveData),
         });
     }
 
@@ -377,6 +386,15 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             .filter((m) => !playerIds.includes(m.id))
             .map((m) => ({ guestId: m.id, displayName: m.displayName }));
 
+        const gameState = gameType === 'tic_tac_toe'
+            ? {
+                board: Array(9).fill(null),
+                players: { X: firstTurn, O: gamePlayers.find((p) => p.guestId !== firstTurn)?.guestId },
+                currentTurn: firstTurn,
+                status: 'playing',
+              }
+            : {};
+
         return {
             roomId: room?.roomId,
             gameId,
@@ -385,15 +403,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             spectators: spectatorList,
             role: playerIds.includes(guest.guestId) ? 'player' : 'spectator',
             gameType,
-            gameState: {
-                board: Array(9).fill(null),
-                players: {
-                    X: firstTurn,
-                    O: gamePlayers.find((p) => p.guestId !== firstTurn)?.guestId,
-                },
-                currentTurn: firstTurn,
-                status: 'playing',
-            },
+            gameState,
         };
     }
 
