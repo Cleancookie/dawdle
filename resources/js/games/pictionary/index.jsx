@@ -17,22 +17,35 @@ class SimpleEmitter {
 }
 
 // ---------------------------------------------------------------------------
-// SVG path helper
+// Canvas drawing helpers
 // ---------------------------------------------------------------------------
-function pointsToPath(points) {
-    if (!points.length) return '';
-    const d = points.reduce((acc, [x, y], i) =>
-        i === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`, '');
-    return d + ' Z';
+const CANVAS_W = 800;
+const CANVAS_H = 500;
+
+function drawStroke(ctx, points, strokeColor, width) {
+    if (points.length < 2) return;
+    const outline = getStroke(points, { size: width * 3, smoothing: 0.5, thinning: 0.5 });
+    if (!outline.length) return;
+    ctx.fillStyle = strokeColor;
+    ctx.beginPath();
+    ctx.moveTo(outline[0][0], outline[0][1]);
+    for (let i = 1; i < outline.length - 1; i++) {
+        const mx = (outline[i][0] + outline[i + 1][0]) / 2;
+        const my = (outline[i][1] + outline[i + 1][1]) / 2;
+        ctx.quadraticCurveTo(outline[i][0], outline[i][1], mx, my);
+    }
+    ctx.closePath();
+    ctx.fill();
 }
 
-function strokeToPath(rawPoints, width) {
-    const outlinePoints = getStroke(rawPoints, {
-        size: width * 4,
-        smoothing: 0.5,
-        thinning: 0.5,
-    });
-    return pointsToPath(outlinePoints);
+function makeCommitted() {
+    const c = document.createElement('canvas');
+    c.width  = CANVAS_W;
+    c.height = CANVAS_H;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    return c;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,180 +86,210 @@ function useCountdown(initialSeconds, onExpire) {
 function PictionaryApp({ config, eventBus, emit }) {
     const { guestId, gameId, players, role: roomRole } = config;
 
-    // Find display name helper
     const allParticipants = [...players, ...(config.spectators ?? [])];
     const getDisplayName = (id) => {
         const p = allParticipants.find((p) => p.guestId === id);
         return p ? p.displayName : id.slice(0, 8);
     };
 
-    // Round state
-    const [round, setRound] = useState(null);           // { round, totalRounds, drawerGuestId, word, timeLimit }
-    const [strokes, setStrokes] = useState([]);          // [{ path, color, isEraser }]
-    const [roundOver, setRoundOver] = useState(null);    // { word, scores }
-    const [guessedCorrect, setGuessedCorrect] = useState(null); // guestId who guessed correctly (first)
-    const [overlay, setOverlay] = useState(null);        // transient message string
-
-    // Drawer drawing state
-    const [color, setColor] = useState('#000000');
-    const [brushWidth, setBrushWidth] = useState(4);
-    const [isEraser, setIsEraser] = useState(false);
-    const currentPoints = useRef([]);
-    const isDrawing = useRef(false);
-    const svgRef = useRef(null);
-
-    // Guesser state
-    const [guessInput, setGuessInput] = useState('');
+    // React state — only UI, never updated during drawing
+    const [round, setRound]               = useState(null);
+    const [roundOver, setRoundOver]       = useState(null);
+    const [overlay, setOverlay]           = useState(null);
+    const [color, setColor]               = useState('#000000');
+    const [brushWidth, setBrushWidth]     = useState(4);
+    const [isEraser, setIsEraser]         = useState(false);
+    const [guessInput, setGuessInput]     = useState('');
     const [inputDisabled, setInputDisabled] = useState(false);
 
-    const isDrawer = round && guestId === round.drawerGuestId;
+    // Canvas refs — all drawing is direct, no React re-renders
+    const canvasRef    = useRef(null);   // visible canvas (in DOM)
+    const committedRef = useRef(null);   // offscreen canvas: all finished strokes
+    const currentPts   = useRef([]);
+    const isDrawing    = useRef(false);
+    const rafPending   = useRef(false);
+    // Keep mutable copies of toolbar state for use inside rAF/pointer callbacks
+    const colorRef      = useRef(color);
+    const widthRef      = useRef(brushWidth);
+    const eraserRef     = useRef(isEraser);
+    useEffect(() => { colorRef.current  = color;      }, [color]);
+    useEffect(() => { widthRef.current  = brushWidth; }, [brushWidth]);
+    useEffect(() => { eraserRef.current = isEraser;   }, [isEraser]);
+
+    const isDrawer   = round && guestId === round.drawerGuestId;
     const isSpectator = roomRole === 'spectator';
 
-    // Expire callback — only drawer emits timeout
-    const handleTimerExpire = useCallback(() => {
-        if (isDrawer) {
-            emit('move', { type: 'pict.timeout' });
-        }
-    }, [isDrawer, emit]);
+    // ------------------------------------------------------------------
+    // Canvas helpers — never touch React state
+    // ------------------------------------------------------------------
+    const commitFlush = useCallback(() => {
+        const canvas    = canvasRef.current;
+        const committed = committedRef.current;
+        if (!canvas || !committed) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+        ctx.drawImage(committed, 0, 0);
+    }, []);
 
-    const timeRemaining = useCountdown(round ? round.timeLimit : 0, handleTimerExpire);
+    const commitStroke = useCallback((pts, strokeColor, width) => {
+        const committed = committedRef.current;
+        if (!committed) return;
+        drawStroke(committed.getContext('2d'), pts, strokeColor, width);
+        commitFlush();
+    }, [commitFlush]);
+
+    const clearCanvas = useCallback(() => {
+        const committed = committedRef.current;
+        const canvas    = canvasRef.current;
+        if (!committed || !canvas) return;
+        const cCtx = committed.getContext('2d');
+        cCtx.fillStyle = '#ffffff';
+        cCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        commitFlush();
+    }, [commitFlush]);
 
     // ------------------------------------------------------------------
-    // Event bus — receiveEvent() pushes here
+    // Initialise offscreen canvas when the visible canvas mounts
+    // ------------------------------------------------------------------
+    const canvasCallbackRef = useCallback((el) => {
+        canvasRef.current = el;
+        if (!el) return;
+        committedRef.current = makeCommitted();
+        commitFlush();
+    }, [commitFlush]);
+
+    // ------------------------------------------------------------------
+    // Event bus — server events land here
     // ------------------------------------------------------------------
     useEffect(() => {
         const handler = (name, payload) => {
             if (name === 'pict.round_started') {
                 setRound({
-                    round: payload.round,
-                    totalRounds: payload.totalRounds,
-                    drawerGuestId: payload.drawerGuestId,
-                    word: null,   // fetched via HTTP below when this client is the drawer
-                    timeLimit: payload.timeLimit,
+                    round: payload.round, totalRounds: payload.totalRounds,
+                    drawerGuestId: payload.drawerGuestId, word: null, timeLimit: payload.timeLimit,
                 });
-                setStrokes([]);
-                setRoundOver(null);
-                setGuessedCorrect(null);
-                setInputDisabled(false);
-                setOverlay(null);
-            } else if (name === 'pict.word_hint') {
-                // Unused — word is fetched via HTTP; kept for forward compatibility
+                setRoundOver(null); setOverlay(null); setInputDisabled(false);
+                clearCanvas();
             } else if (name === 'pict.stroke') {
-                // Guesser/spectator receives completed strokes from server relay
-                const path = strokeToPath(
-                    payload.points.map((p) => [p.x, p.y]),
-                    payload.width
-                );
-                setStrokes((prev) => [
-                    ...prev,
-                    { path, color: payload.isEraser ? '#ffffff' : payload.color, isEraser: payload.isEraser },
-                ]);
+                const pts   = payload.points.map((p) => [p.x, p.y]);
+                const color = payload.isEraser ? '#ffffff' : payload.color;
+                commitStroke(pts, color, payload.width);
             } else if (name === 'pict.canvas_clear') {
-                setStrokes([]);
+                clearCanvas();
             } else if (name === 'pict.guess_correct') {
                 if (payload.guestId === guestId) {
-                    setInputDisabled(true);
-                    setOverlay('You got it!');
+                    setInputDisabled(true); setOverlay('You got it!');
                 } else {
                     setOverlay(`${payload.displayName} guessed it!`);
                     setTimeout(() => setOverlay(null), 3000);
                 }
-                setGuessedCorrect(payload.guestId);
             } else if (name === 'pict.round_ended') {
                 setRoundOver({ word: payload.word, scores: payload.scores });
-                // Clear canvas after 3 seconds and await next round_started
-                setTimeout(() => {
-                    setStrokes([]);
-                    setRoundOver(null);
-                }, 3000);
+                setTimeout(() => { clearCanvas(); setRoundOver(null); }, 3000);
             }
         };
-
         eventBus.on('event', handler);
         return () => eventBus.off('event', handler);
-    }, [guestId, eventBus]);
+    }, [guestId, eventBus, clearCanvas, commitStroke]);
 
-    // Fetch word from server when this client is the drawer for the current round
+    // Fetch word when this client becomes drawer
     useEffect(() => {
         if (!round || round.drawerGuestId !== guestId || round.word) return;
         fetch(`/api/v1/games/${gameId}/word`, {
             headers: { 'X-Guest-ID': guestId, 'Accept': 'application/json' },
         })
             .then((r) => r.ok ? r.json() : null)
-            .then((data) => {
-                if (data?.word) setRound((prev) => prev ? { ...prev, word: data.word } : prev);
-            })
+            .then((data) => { if (data?.word) setRound((prev) => prev ? { ...prev, word: data.word } : prev); })
             .catch(() => {});
     }, [round?.round, round?.drawerGuestId, guestId, gameId]);
 
     // ------------------------------------------------------------------
-    // Drawing handlers (drawer only)
+    // Timer
     // ------------------------------------------------------------------
-    const getSVGPoint = (e) => {
-        const svg = svgRef.current;
-        if (!svg) return null;
-        const rect = svg.getBoundingClientRect();
+    const handleTimerExpire = useCallback(() => {
+        if (isDrawer) emit('move', { type: 'pict.timeout' });
+    }, [isDrawer, emit]);
+    const timeRemaining = useCountdown(round ? round.timeLimit : 0, handleTimerExpire);
+
+    // ------------------------------------------------------------------
+    // Pointer handlers — draw directly to canvas, no setState
+    // ------------------------------------------------------------------
+    const getCanvasPt = (e) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        const rect = canvas.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const clientY = e.touches ? e.touches[0].clientY : e.clientY;
         return [
-            ((clientX - rect.left) / rect.width) * 600,
-            ((clientY - rect.top) / rect.height) * 400,
+            ((clientX - rect.left) / rect.width)  * CANVAS_W,
+            ((clientY - rect.top)  / rect.height) * CANVAS_H,
         ];
     };
 
-    const onPointerDown = (e) => {
+    const scheduleFrame = useCallback(() => {
+        if (rafPending.current) return;
+        rafPending.current = true;
+        requestAnimationFrame(() => {
+            rafPending.current = false;
+            const canvas    = canvasRef.current;
+            const committed = committedRef.current;
+            if (!canvas || !committed) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+            ctx.drawImage(committed, 0, 0);
+            const pts = currentPts.current;
+            if (pts.length > 1) {
+                const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
+                drawStroke(ctx, pts, strokeColor, widthRef.current);
+            }
+        });
+    }, []);
+
+    const onPointerDown = useCallback((e) => {
         if (!isDrawer || !round) return;
         e.preventDefault();
+        canvasRef.current?.setPointerCapture(e.pointerId);
         isDrawing.current = true;
-        const pt = getSVGPoint(e);
-        if (pt) currentPoints.current = [pt];
-    };
+        const pt = getCanvasPt(e);
+        if (pt) currentPts.current = [pt];
+    }, [isDrawer, round]);
 
-    const onPointerMove = (e) => {
-        if (!isDrawer || !isDrawing.current) return;
+    const onPointerMove = useCallback((e) => {
+        if (!isDrawing.current) return;
         e.preventDefault();
-        const pt = getSVGPoint(e);
+        const pt = getCanvasPt(e);
         if (!pt) return;
-        currentPoints.current = [...currentPoints.current, pt];
-        // Force a re-render for live preview
-        setStrokes((prev) => prev); // triggers re-render; preview is in currentPoints
-    };
+        currentPts.current = [...currentPts.current, pt];
+        scheduleFrame();
+    }, [scheduleFrame]);
 
-    const onPointerUp = (e) => {
-        if (!isDrawer || !isDrawing.current) return;
+    const onPointerUp = useCallback((e) => {
+        if (!isDrawing.current) return;
         e.preventDefault();
         isDrawing.current = false;
-
-        const pts = currentPoints.current;
+        const pts = currentPts.current;
+        currentPts.current = [];
         if (!pts.length) return;
-
-        const activeColor = isEraser ? '#ffffff' : color;
-        const path = strokeToPath(pts, brushWidth);
-
-        // Add to local strokes
-        setStrokes((prev) => [...prev, { path, color: activeColor, isEraser }]);
-
-        // Emit to server
+        const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
+        commitStroke(pts, strokeColor, widthRef.current);
         emit('move', {
             type: 'pict.stroke',
             points: pts.map(([x, y]) => ({ x, y })),
-            color: activeColor,
-            width: brushWidth,
-            isEraser,
+            color: strokeColor,
+            width: widthRef.current,
+            isEraser: eraserRef.current,
         });
+    }, [commitStroke, emit]);
 
-        currentPoints.current = [];
-    };
-
-    const handleClear = () => {
+    const handleClear = useCallback(() => {
         if (!isDrawer) return;
-        setStrokes([]);
-        currentPoints.current = [];
+        clearCanvas();
+        currentPts.current = [];
         emit('move', { type: 'pict.canvas_clear' });
-    };
+    }, [isDrawer, clearCanvas, emit]);
 
     // ------------------------------------------------------------------
-    // Guess handler (guesser only)
+    // Guess
     // ------------------------------------------------------------------
     const handleGuessSubmit = (e) => {
         e.preventDefault();
@@ -257,17 +300,8 @@ function PictionaryApp({ config, eventBus, emit }) {
     };
 
     // ------------------------------------------------------------------
-    // Live preview path (drawer only, current stroke in progress)
-    // ------------------------------------------------------------------
-    const previewPath = isDrawer && isDrawing.current && currentPoints.current.length
-        ? strokeToPath(currentPoints.current, brushWidth)
-        : null;
-
-    // ------------------------------------------------------------------
     // Render
     // ------------------------------------------------------------------
-
-    // Waiting for first round
     if (!round) {
         return (
             <div style={styles.container}>
@@ -281,7 +315,6 @@ function PictionaryApp({ config, eventBus, emit }) {
 
     return (
         <div style={styles.container}>
-            {/* Header */}
             <div style={styles.header}>
                 <span style={styles.roundLabel}>
                     Round {round.round} of {round.totalRounds} — {drawerName} is drawing!
@@ -289,43 +322,23 @@ function PictionaryApp({ config, eventBus, emit }) {
                 <span style={{ ...styles.timer, color: timerColor }}>{timeRemaining}s</span>
             </div>
 
-            {/* Word (drawer only) */}
             {isDrawer && round.word && (
                 <div style={styles.word}>Draw: <strong>{round.word}</strong></div>
             )}
 
-            {/* Canvas area */}
             <div style={styles.canvasWrapper}>
-                <svg
-                    ref={svgRef}
-                    viewBox="0 0 600 400"
-                    style={styles.svg}
+                <canvas
+                    ref={canvasCallbackRef}
+                    width={CANVAS_W}
+                    height={CANVAS_H}
+                    style={styles.canvas}
                     onPointerDown={isDrawer ? onPointerDown : undefined}
                     onPointerMove={isDrawer ? onPointerMove : undefined}
                     onPointerUp={isDrawer ? onPointerUp : undefined}
                     onPointerLeave={isDrawer ? onPointerUp : undefined}
-                    onTouchStart={isDrawer ? onPointerDown : undefined}
-                    onTouchMove={isDrawer ? onPointerMove : undefined}
-                    onTouchEnd={isDrawer ? onPointerUp : undefined}
-                >
-                    <rect width="600" height="400" fill="#ffffff" />
-                    {strokes.map((s, i) => (
-                        <path key={i} d={s.path} fill={s.color} stroke="none" />
-                    ))}
-                    {/* Live preview */}
-                    {previewPath && (
-                        <path
-                            d={previewPath}
-                            fill={isEraser ? '#ffffff' : color}
-                            stroke="none"
-                        />
-                    )}
-                </svg>
+                />
 
-                {/* Overlays */}
-                {overlay && (
-                    <div style={styles.overlay}>{overlay}</div>
-                )}
+                {overlay && <div style={styles.overlay}>{overlay}</div>}
                 {roundOver && (
                     <div style={styles.roundOverlay}>
                         <div style={styles.roundOverCard}>
@@ -335,7 +348,7 @@ function PictionaryApp({ config, eventBus, emit }) {
                                 {roundOver.scores.map((s) => (
                                     <div key={s.guestId} style={styles.scoreRow}>
                                         <span>{getDisplayName(s.guestId)}</span>
-                                        <span>+{s.score ?? s.roundScore ?? 0}</span>
+                                        <span>+{s.score ?? 0}</span>
                                     </div>
                                 ))}
                             </div>
@@ -344,7 +357,6 @@ function PictionaryApp({ config, eventBus, emit }) {
                 )}
             </div>
 
-            {/* Drawer toolbar */}
             {isDrawer && (
                 <div style={styles.toolbar}>
                     {['#000000', '#dc2626', '#2563eb', '#16a34a', '#f59e0b', '#7c3aed'].map((c) => (
@@ -356,47 +368,32 @@ function PictionaryApp({ config, eventBus, emit }) {
                                 background: c,
                                 outline: color === c && !isEraser ? '3px solid #374151' : 'none',
                             }}
-                            title={c}
                         />
                     ))}
                     <div style={styles.separator} />
                     <label style={styles.widthLabel}>
                         Size
-                        <input
-                            type="range"
-                            min="1"
-                            max="12"
-                            value={brushWidth}
+                        <input type="range" min="1" max="12" value={brushWidth}
                             onChange={(e) => setBrushWidth(Number(e.target.value))}
-                            style={{ marginLeft: 6, width: 80 }}
-                        />
+                            style={{ marginLeft: 6, width: 80 }} />
                     </label>
                     <div style={styles.separator} />
-                    <button
-                        onClick={() => setIsEraser((e) => !e)}
-                        style={{ ...styles.toolBtn, background: isEraser ? '#e5e7eb' : 'transparent' }}
-                    >
+                    <button onClick={() => setIsEraser((v) => !v)}
+                        style={{ ...styles.toolBtn, background: isEraser ? '#e5e7eb' : 'transparent' }}>
                         Eraser
                     </button>
                     <button onClick={handleClear} style={styles.toolBtn}>Clear</button>
                 </div>
             )}
 
-            {/* Guesser input */}
             {!isDrawer && !isSpectator && (
                 <form onSubmit={handleGuessSubmit} style={styles.guessForm}>
-                    <input
-                        type="text"
-                        value={guessInput}
+                    <input type="text" value={guessInput}
                         onChange={(e) => setGuessInput(e.target.value)}
                         disabled={inputDisabled}
                         placeholder={inputDisabled ? 'You guessed it!' : 'Type your guess…'}
-                        style={styles.guessInput}
-                        autoComplete="off"
-                    />
-                    <button type="submit" disabled={inputDisabled} style={styles.guessBtn}>
-                        Guess
-                    </button>
+                        style={styles.guessInput} autoComplete="off" />
+                    <button type="submit" disabled={inputDisabled} style={styles.guessBtn}>Guess</button>
                 </form>
             )}
         </div>
@@ -454,7 +451,7 @@ const styles = {
         display: 'flex',
         alignItems: 'stretch',
     },
-    svg: {
+    canvas: {
         width: '100%',
         height: '100%',
         display: 'block',
