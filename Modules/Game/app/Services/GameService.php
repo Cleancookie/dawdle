@@ -16,10 +16,12 @@ use Modules\Game\Models\GameSession;
 use Modules\Game\Services\Pictionary\GameLogic as PictGameLogic;
 use Modules\Game\Services\TicTacToe\GameLogic as TttGameLogic;
 use Modules\Room\Events\GameStarted;
-use Modules\Room\Models\Room;
+use Modules\Room\Services\RoomService;
 
 class GameService
 {
+    public function __construct(private RoomService $roomService) {}
+
     public function startGame(string $roomId, array $playerGuestIds, string $gameType): array
     {
         $session = GameSession::forceCreate([
@@ -47,8 +49,7 @@ class GameService
         }
 
         Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
-        Redis::hset("dawdle:room:{$roomId}", 'status', 'playing');
-        Room::where('id', $roomId)->update(['status' => 'playing']);
+        $this->roomService->setStatus($roomId, 'playing');
 
         broadcast(new GameStarted($roomId, $gameId, $gameType, $players, $firstTurn));
 
@@ -276,8 +277,7 @@ class GameService
 
         Redis::del("dawdle:game:{$gameId}:state");
         Redis::del("dawdle:room:{$roomId}:ready");
-        Redis::hset("dawdle:room:{$roomId}", 'status', 'waiting');
-        Room::where('id', $roomId)->update(['status' => 'waiting']);
+        $this->roomService->setStatus($roomId, 'waiting');
     }
 
     private function getDisplayName(string $guestId): string

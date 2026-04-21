@@ -188,6 +188,12 @@ class RoomService
         return ['ready' => $ready, 'shouldStart' => false];
     }
 
+    public function setStatus(string $roomId, string $status): void
+    {
+        Redis::hset("dawdle:room:{$roomId}", 'status', $status);
+        Room::where('id', $roomId)->update(['status' => $status]);
+    }
+
     public function selectGame(string $code, string $guestId, string $gameType): void
     {
         $room = Room::where('code', $code)->firstOrFail();
