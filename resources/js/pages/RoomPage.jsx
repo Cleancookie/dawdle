@@ -97,7 +97,7 @@ function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySe
     );
 }
 
-function GameArea({ gameType, gameConfig, onMove, onComplete, gameRef }) {
+function GameArea({ gameType, gameConfig, onMove, onComplete, onMounted, gameRef }) {
     const containerRef = useRef(null);
 
     useLayoutEffect(() => {
@@ -108,6 +108,7 @@ function GameArea({ gameType, gameConfig, onMove, onComplete, gameRef }) {
         game.on('move', onMove);
         game.on('complete', onComplete);
         gameRef.current = game;
+        onMounted?.();
 
         return () => {
             game.destroy();
@@ -169,6 +170,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const messagesEndRef = useRef(null);
     const chatInputRef = useRef(null);
     const gameRef = useRef(null);
+    const pendingGameEvents = useRef([]);
 
     function sysMsg(text) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
@@ -260,6 +262,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         if (!channel) return;
         channel.listen('.game.ended', (data) => {
             gameRef.current?.receiveEvent('game.ended', data);
+            pendingGameEvents.current = [];
             setPhase('score');
             setScores(data.scores);
             setGameSession(null);
@@ -269,29 +272,28 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         return () => channel.stopListening('.game.ended');
     }, [channel]);
 
+    // All game event forwarding in one effect — registered as soon as channel is
+    // available so we never miss events that fire immediately after game.started.
+    // Events that arrive before the game module mounts are buffered and drained
+    // once the module is ready (via handleGameMounted).
     useEffect(() => {
-        if (!channel || phase !== 'playing') return;
-        channel.listen('.ttt.move_made', (data) => {
-            gameRef.current?.receiveEvent('ttt.move_made', data);
-        });
-        return () => channel.stopListening('.ttt.move_made');
-    }, [channel, phase]);
-
-    useEffect(() => {
-        if (!channel || phase !== 'playing') return;
-        const fwd = (name) => (data) => gameRef.current?.receiveEvent(name, data);
-        const pictEvents = ['pict.round_started', 'pict.stroke', 'pict.stroke_delta', 'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended'];
-        pictEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
-        return () => pictEvents.forEach((e) => channel.stopListening('.' + e));
-    }, [channel, phase]);
-
-    useEffect(() => {
-        if (!channel || phase !== 'playing') return;
-        const fwd = (name) => (data) => gameRef.current?.receiveEvent(name, data);
-        const spottoEvents = ['spotto.round_started', 'spotto.point_scored'];
-        spottoEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
-        return () => spottoEvents.forEach((e) => channel.stopListening('.' + e));
-    }, [channel, phase]);
+        if (!channel) return;
+        const fwd = (name) => (data) => {
+            if (gameRef.current) {
+                gameRef.current.receiveEvent(name, data);
+            } else {
+                pendingGameEvents.current.push([name, data]);
+            }
+        };
+        const gameEvents = [
+            'ttt.move_made',
+            'pict.round_started', 'pict.stroke', 'pict.stroke_delta',
+            'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
+            'spotto.round_started', 'spotto.point_scored',
+        ];
+        gameEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
+        return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
+    }, [channel]);
 
 
     useEffect(() => {
@@ -338,6 +340,13 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
     function handleComplete() {
         // game.ended from server is the canonical trigger; this is a secondary signal
+    }
+
+    function handleGameMounted() {
+        const game = gameRef.current;
+        if (!game) return;
+        pendingGameEvents.current.forEach(([name, data]) => game.receiveEvent(name, data));
+        pendingGameEvents.current = [];
     }
 
     function handlePlayAgain() {
@@ -466,6 +475,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             gameConfig={gameConfig}
                             onMove={handleMove}
                             onComplete={handleComplete}
+                            onMounted={handleGameMounted}
                             gameRef={gameRef}
                         />
                     )}
