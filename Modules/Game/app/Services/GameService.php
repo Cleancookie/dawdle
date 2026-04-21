@@ -10,10 +10,13 @@ use Modules\Game\Events\Pictionary\PictGuessCorrect;
 use Modules\Game\Events\Pictionary\PictRoundEnded;
 use Modules\Game\Events\Pictionary\PictRoundStarted;
 use Modules\Game\Events\Pictionary\PictStroke;
+use Modules\Game\Events\Spotto\SpottoPointScored;
+use Modules\Game\Events\Spotto\SpottoRoundStarted;
 use Modules\Game\Events\TttMoveMade;
 use Modules\Game\Models\GameResult;
 use Modules\Game\Models\GameSession;
 use Modules\Game\Services\Pictionary\GameLogic as PictGameLogic;
+use Modules\Game\Services\Spotto\GameLogic as SpottoGameLogic;
 use Modules\Game\Services\TicTacToe\GameLogic as TttGameLogic;
 use Modules\Room\Events\GameStarted;
 use Modules\Room\Services\RoomService;
@@ -44,6 +47,10 @@ class GameService
             $state = PictGameLogic::initialState($gameId, $roomId, $playerGuestIds);
             $players = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
             $firstTurn = $state['currentDrawer'];
+        } elseif ($gameType === 'spotto') {
+            $state = SpottoGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+            $players = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
+            $firstTurn = null;
         } else {
             throw new \InvalidArgumentException('Unsupported game type');
         }
@@ -55,6 +62,8 @@ class GameService
 
         if ($gameType === 'pictionary') {
             $this->broadcastRoundStarted($roomId, $gameId, $state);
+        } elseif ($gameType === 'spotto') {
+            $this->broadcastSpottoRoundStarted($roomId, $gameId, $state);
         }
 
         return ['gameId' => $gameId, 'state' => $state];
@@ -76,6 +85,10 @@ class GameService
 
         if ($gameType === 'pictionary') {
             return $this->applyPictionaryMove($gameId, $guestId, $moveData, $state);
+        }
+
+        if ($gameType === 'spotto') {
+            return $this->applySpottoMove($gameId, $guestId, $moveData, $state);
         }
 
         throw new \RuntimeException('Unknown game type: '.$gameType);
@@ -119,7 +132,7 @@ class GameService
         $roomId = $state['roomId'];
         $type = $moveData['type'] ?? '';
 
-        if ($type === 'pict.stroke') {
+        if ($type === 'pict.stroke' || $type === 'pict.stroke_delta') {
             if ($guestId !== $state['currentDrawer']) {
                 throw new \DomainException('Only the drawer can send strokes.');
             }
@@ -127,10 +140,13 @@ class GameService
                 $roomId,
                 $gameId,
                 $guestId,
+                $type,
                 $moveData['points'] ?? [],
                 $moveData['color'] ?? '#000000',
                 $moveData['width'] ?? 2,
                 $moveData['isEraser'] ?? false,
+                $moveData['strokeId'] ?? null,
+                $moveData['final'] ?? true,
             ))->toOthers();
 
             return $state;
@@ -201,6 +217,53 @@ class GameService
         $this->broadcastRoundStarted($roomId, $gameId, $state);
     }
 
+    private function applySpottoMove(string $gameId, string $guestId, array $moveData, array $state): array
+    {
+        $type = $moveData['type'] ?? '';
+        if ($type !== 'spotto.guess') {
+            throw new \InvalidArgumentException('Unknown move type: '.$type);
+        }
+
+        $roomId    = $state['roomId'];
+        $symbolIdx = (int) ($moveData['symbolIdx'] ?? -1);
+
+        $state = SpottoGameLogic::applyGuess($state, $guestId, $symbolIdx);
+
+        $scores = [];
+        foreach ($state['scores'] as $id => $score) {
+            $scores[] = ['guestId' => $id, 'score' => $score];
+        }
+
+        broadcast(new SpottoPointScored(
+            $roomId, $gameId, $guestId,
+            $this->getDisplayName($guestId),
+            $symbolIdx, $scores,
+        ));
+
+        $state = SpottoGameLogic::advanceRound($state);
+        Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+
+        if ($state['status'] === 'finished') {
+            $this->endGame($gameId, $state);
+        } else {
+            $this->broadcastSpottoRoundStarted($roomId, $gameId, $state);
+        }
+
+        return $state;
+    }
+
+    private function broadcastSpottoRoundStarted(string $roomId, string $gameId, array $state): void
+    {
+        broadcast(new SpottoRoundStarted(
+            $roomId, $gameId,
+            $state['round'],
+            $state['totalRounds'],
+            $state['centerCard'],
+            $state['playerCards'],
+            $state['symbols'],
+        ));
+    }
+
     private function broadcastRoundStarted(string $roomId, string $gameId, array $state): void
     {
         $drawerGuestId     = $state['currentDrawer'];
@@ -223,7 +286,7 @@ class GameService
         $session = GameSession::findOrFail($gameId);
         $roomId = $session->room_id;
 
-        if ($state['gameType'] === 'pictionary') {
+        if ($state['gameType'] === 'pictionary' || $state['gameType'] === 'spotto') {
             $scoresMap = $state['scores'];
             arsort($scoresMap);
             $winnerGuestId = array_key_first($scoresMap);

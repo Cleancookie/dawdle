@@ -17,12 +17,15 @@ class GameController extends Controller
             'type'        => 'sometimes|string|max:64',
             'index'       => 'sometimes|integer|min:0|max:8',
             'guess'       => 'sometimes|string|max:100',
-            'points'      => 'sometimes|array|max:200',
-            'points.*.x'  => 'sometimes|numeric|min:-10|max:610',
-            'points.*.y'  => 'sometimes|numeric|min:-10|max:410',
+            'points'      => 'sometimes|array|max:500',
+            'points.*.x'  => 'sometimes|numeric|min:-10|max:810',
+            'points.*.y'  => 'sometimes|numeric|min:-10|max:510',
             'color'       => ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'width'       => 'sometimes|integer|min:1|max:20',
             'isEraser'    => 'sometimes|boolean',
+            'strokeId'    => 'sometimes|nullable|string|max:64',
+            'final'       => 'sometimes|boolean',
+            'symbolIdx'   => 'sometimes|integer|min:0|max:255',
         ]);
         $guestId = $request->header('X-Guest-ID');
         $moveData = $request->all();

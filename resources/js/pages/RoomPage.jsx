@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useRoom } from '../hooks/use-room';
 import TicTacToeGame from '../games/tic-tac-toe/index.js';
 import PictionaryGame from '../games/pictionary/index.jsx';
+import SpottoGame from '../games/spotto/index.jsx';
 
-const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame };
+const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, spotto: SpottoGame };
 
-const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary' };
+const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto' };
 
 function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
     const [linkCopied, setLinkCopied] = useState(false);
@@ -278,9 +279,17 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     useEffect(() => {
         if (!channel || phase !== 'playing') return;
         const fwd = (name) => (data) => gameRef.current?.receiveEvent(name, data);
-        const pictEvents = ['pict.round_started', 'pict.stroke', 'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended'];
+        const pictEvents = ['pict.round_started', 'pict.stroke', 'pict.stroke_delta', 'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended'];
         pictEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
         return () => pictEvents.forEach((e) => channel.stopListening('.' + e));
+    }, [channel, phase]);
+
+    useEffect(() => {
+        if (!channel || phase !== 'playing') return;
+        const fwd = (name) => (data) => gameRef.current?.receiveEvent(name, data);
+        const spottoEvents = ['spotto.round_started', 'spotto.point_scored'];
+        spottoEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
+        return () => spottoEvents.forEach((e) => channel.stopListening('.' + e));
     }, [channel, phase]);
 
 
