@@ -113,11 +113,12 @@ function SpottoApp({ config, eventBus, emit }) {
         const handler = (name, payload) => {
             if (name === 'spotto.round_started') {
                 setRound({
-                    round:       payload.round,
-                    totalRounds: payload.totalRounds,
-                    centerCard:  payload.centerCard,
-                    myCard:      payload.playerCards[guestId] ?? [],
-                    symbols:     payload.symbols,
+                    round:        payload.round,
+                    totalRounds:  payload.totalRounds,
+                    centerCard:   payload.centerCard,
+                    myCard:       payload.playerCards[guestId] ?? [],
+                    playerCards:  payload.playerCards,
+                    symbols:      payload.symbols,
                 });
                 setLastPoint(null);
                 setLocked(false);
@@ -126,6 +127,14 @@ function SpottoApp({ config, eventBus, emit }) {
                 setLastPoint({ guestId: payload.guestId, displayName: payload.displayName, symbolIdx: payload.symbolIdx });
                 setScores(Object.fromEntries(payload.scores.map((s) => [s.guestId, s.score])));
                 setLocked(true);
+                // Safety unlock in case round_started is delayed
+                clearTimeout(lockTimer.current);
+                lockTimer.current = setTimeout(() => setLocked(false), 3000);
+            } else if (name === 'game.ended') {
+                emit('complete', {
+                    scores: payload.scores,
+                    winner: payload.winner,
+                });
             }
         };
         eventBus.on('event', handler);
@@ -202,9 +211,7 @@ function SpottoApp({ config, eventBus, emit }) {
                     <div style={styles.cardLabel}>{isSpectator ? 'Players\' cards' : 'Your card'}</div>
                     {isSpectator ? (
                         <div style={styles.spectatorCards}>
-                            {Object.entries(round.myCard.length ? { [guestId]: round.myCard } : {}).concat(
-                                Object.entries(round.playerCards ?? {})
-                            ).slice(0, 4).map(([id, card]) => (
+                            {Object.entries(round.playerCards ?? {}).map(([id, card]) => (
                                 <div key={id} style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>
                                         {getDisplayName(id)}

@@ -259,6 +259,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     useEffect(() => {
         if (!channel) return;
         channel.listen('.game.ended', (data) => {
+            gameRef.current?.receiveEvent('game.ended', data);
             setPhase('score');
             setScores(data.scores);
             setGameSession(null);
