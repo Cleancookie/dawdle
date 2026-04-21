@@ -115,6 +115,12 @@ function PictionaryApp({ config, eventBus, emit }) {
     useEffect(() => { colorRef.current  = color;      }, [color]);
     useEffect(() => { widthRef.current  = brushWidth; }, [brushWidth]);
     useEffect(() => { eraserRef.current = isEraser;   }, [isEraser]);
+    // Throttled delta streaming
+    const strokeIdRef    = useRef(null);
+    const lastSentIdx    = useRef(0);
+    const lastEmitTime   = useRef(0);
+    // Incoming remote stroke accumulator (guesser/spectator preview)
+    const remoteStroke   = useRef({ strokeId: null, pts: [], color: '#000000', width: 4 });
 
     const isDrawer   = round && guestId === round.drawerGuestId;
     const isSpectator = roomRole === 'spectator';
@@ -174,7 +180,23 @@ function PictionaryApp({ config, eventBus, emit }) {
                 const pts   = payload.points.map((p) => [p.x, p.y]);
                 const color = payload.isEraser ? '#ffffff' : payload.color;
                 commitStroke(pts, color, payload.width);
+            } else if (name === 'pict.stroke_delta') {
+                const newPts      = payload.points.map((p) => [p.x, p.y]);
+                const strokeColor = payload.isEraser ? '#ffffff' : payload.color;
+                const remote      = remoteStroke.current;
+                if (remote.strokeId !== payload.strokeId) {
+                    remoteStroke.current = { strokeId: payload.strokeId, pts: newPts, color: strokeColor, width: payload.width };
+                } else {
+                    remoteStroke.current = { ...remote, pts: [...remote.pts, ...newPts] };
+                }
+                if (payload.final) {
+                    commitStroke(remoteStroke.current.pts, remoteStroke.current.color, remoteStroke.current.width);
+                    remoteStroke.current = { strokeId: null, pts: [], color: '#000000', width: 4 };
+                } else {
+                    scheduleFrame();
+                }
             } else if (name === 'pict.canvas_clear') {
+                remoteStroke.current = { strokeId: null, pts: [], color: '#000000', width: 4 };
                 clearCanvas();
             } else if (name === 'pict.guess_correct') {
                 if (payload.guestId === guestId) {
@@ -190,7 +212,7 @@ function PictionaryApp({ config, eventBus, emit }) {
         };
         eventBus.on('event', handler);
         return () => eventBus.off('event', handler);
-    }, [guestId, eventBus, clearCanvas, commitStroke]);
+    }, [guestId, eventBus, clearCanvas, commitStroke, scheduleFrame]);
 
     // Fetch word when this client becomes drawer
     useEffect(() => {
@@ -242,6 +264,11 @@ function PictionaryApp({ config, eventBus, emit }) {
                 const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
                 drawStroke(ctx, pts, strokeColor, widthRef.current);
             }
+            // Remote in-progress stroke preview (guesser sees drawer drawing live)
+            const remote = remoteStroke.current;
+            if (remote.pts.length > 1) {
+                drawStroke(ctx, remote.pts, remote.color, remote.width);
+            }
         });
     }, []);
 
@@ -250,6 +277,9 @@ function PictionaryApp({ config, eventBus, emit }) {
         e.preventDefault();
         canvasRef.current?.setPointerCapture(e.pointerId);
         isDrawing.current = true;
+        strokeIdRef.current  = crypto.randomUUID();
+        lastSentIdx.current  = 0;
+        lastEmitTime.current = 0;
         const pt = getCanvasPt(e);
         if (pt) currentPts.current = [pt];
     }, [isDrawer, round]);
@@ -261,7 +291,25 @@ function PictionaryApp({ config, eventBus, emit }) {
         if (!pt) return;
         currentPts.current = [...currentPts.current, pt];
         scheduleFrame();
-    }, [scheduleFrame]);
+
+        const now = Date.now();
+        if (now - lastEmitTime.current > 50) {
+            const newPts = currentPts.current.slice(lastSentIdx.current);
+            if (newPts.length > 0) {
+                lastSentIdx.current  = currentPts.current.length;
+                lastEmitTime.current = now;
+                emit('move', {
+                    type:     'pict.stroke_delta',
+                    strokeId: strokeIdRef.current,
+                    points:   newPts.map(([x, y]) => ({ x, y })),
+                    color:    eraserRef.current ? '#ffffff' : colorRef.current,
+                    width:    widthRef.current,
+                    isEraser: eraserRef.current,
+                    final:    false,
+                });
+            }
+        }
+    }, [scheduleFrame, emit]);
 
     const onPointerUp = useCallback((e) => {
         if (!isDrawing.current) return;
@@ -272,12 +320,16 @@ function PictionaryApp({ config, eventBus, emit }) {
         if (!pts.length) return;
         const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
         commitStroke(pts, strokeColor, widthRef.current);
+        // Send remaining unshipped points as the final delta
+        const remainingPts = pts.slice(lastSentIdx.current);
         emit('move', {
-            type: 'pict.stroke',
-            points: pts.map(([x, y]) => ({ x, y })),
-            color: strokeColor,
-            width: widthRef.current,
+            type:     'pict.stroke_delta',
+            strokeId: strokeIdRef.current,
+            points:   remainingPts.map(([x, y]) => ({ x, y })),
+            color:    strokeColor,
+            width:    widthRef.current,
             isEraser: eraserRef.current,
+            final:    true,
         });
     }, [commitStroke, emit]);
 
