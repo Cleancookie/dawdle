@@ -138,7 +138,7 @@ function ScoreScreen({ scores, members, myGuestId, onPlayAgain }) {
                             </span>
                         </span>
                         <span className="text-sm font-medium text-gray-600">
-                            {s.score > 0 ? 'Win' : 'Loss'}
+                            {s.score} pts
                         </span>
                     </li>
                 ))}

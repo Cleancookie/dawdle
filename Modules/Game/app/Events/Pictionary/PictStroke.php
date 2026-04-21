@@ -15,6 +15,7 @@ class PictStroke implements ShouldBroadcastNow
     public function __construct(
         public string $roomId,
         public string $gameId,
+        public string $drawerGuestId,
         public array $points,
         public string $color,
         public int $width,
@@ -34,11 +35,12 @@ class PictStroke implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId' => $this->gameId,
-            'points' => $this->points,
-            'color' => $this->color,
-            'width' => $this->width,
-            'isEraser' => $this->isEraser,
+            'gameId'         => $this->gameId,
+            'drawerGuestId'  => $this->drawerGuestId,
+            'points'         => $this->points,
+            'color'          => $this->color,
+            'width'          => $this->width,
+            'isEraser'       => $this->isEraser,
         ];
     }
 }

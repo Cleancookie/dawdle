@@ -126,6 +126,7 @@ class GameService
             broadcast(new PictStroke(
                 $roomId,
                 $gameId,
+                $guestId,
                 $moveData['points'] ?? [],
                 $moveData['color'] ?? '#000000',
                 $moveData['width'] ?? 2,

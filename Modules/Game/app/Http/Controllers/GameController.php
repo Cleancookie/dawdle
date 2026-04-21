@@ -42,11 +42,23 @@ class GameController extends Controller
 
     public function state(Request $request, string $gameId): JsonResponse
     {
-        $state = $this->gameService->getState($gameId);
+        $guestId = $request->header('X-Guest-ID');
+        $state   = $this->gameService->getState($gameId);
 
         if ($state === null) {
             return response()->json(['error' => 'Game not found'], 404);
         }
+
+        $roomId      = $state['roomId'] ?? null;
+        $playerOrder = $state['playerOrder'] ?? array_values($state['players'] ?? []);
+        $inGame      = $roomId && in_array($guestId, $playerOrder, true);
+
+        if (!$inGame) {
+            return response()->json(['error' => 'Forbidden'], 403);
+        }
+
+        // Strip word from state response — drawers must use GET /games/:id/word
+        unset($state['word']);
 
         return response()->json($state);
     }

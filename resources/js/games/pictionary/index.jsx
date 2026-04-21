@@ -8,6 +8,10 @@ import { getStroke } from 'perfect-freehand';
 class SimpleEmitter {
     constructor() { this._listeners = {}; }
     on(event, fn) { (this._listeners[event] ??= []).push(fn); return this; }
+    off(event, fn) {
+        const list = this._listeners[event];
+        if (list) this._listeners[event] = list.filter((f) => f !== fn);
+    }
     emit(event, ...args) { (this._listeners[event] ?? []).forEach((fn) => fn(...args)); }
     removeAllListeners() { this._listeners = {}; }
 }
@@ -58,7 +62,7 @@ function useCountdown(initialSeconds, onExpire) {
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [initialSeconds]);
+    }, [initialSeconds, onExpire]);
 
     return seconds;
 }
@@ -159,14 +163,7 @@ function PictionaryApp({ config, eventBus, emit }) {
         };
 
         eventBus.on('event', handler);
-        return () => {
-            // Remove just this handler by rebuilding the listener array
-            const list = eventBus._listeners['event'];
-            if (list) {
-                const idx = list.indexOf(handler);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        };
+        return () => eventBus.off('event', handler);
     }, [guestId, eventBus]);
 
     // Fetch word from server when this client is the drawer for the current round
