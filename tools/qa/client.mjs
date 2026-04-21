@@ -74,6 +74,24 @@ export class VirtualClient {
         })
     }
 
+    subscribePrivate(channelName) {
+        return new Promise((resolve, reject) => {
+            const ch = this._pusher.subscribe(`private-${channelName}`)
+            ch.bind('pusher:subscription_succeeded', () => {
+                ch.bind_global((event, data) => {
+                    if (!event.startsWith('pusher:')) {
+                        this._events.push({ event, data, at: Date.now() })
+                    }
+                })
+                resolve(ch)
+            })
+            ch.bind('pusher:subscription_error', (err) => {
+                reject(new Error(`Private channel subscription failed: ${JSON.stringify(err)}`))
+            })
+            setTimeout(() => reject(new Error(`Private channel subscribe timeout: ${channelName}`)), 5_000)
+        })
+    }
+
     waitForEvent(name, timeoutMs = 5_000, afterIndex = 0) {
         const start = Date.now()
         return new Promise((resolve, reject) => {

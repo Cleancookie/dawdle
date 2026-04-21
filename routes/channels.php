@@ -21,3 +21,9 @@ Broadcast::channel('room.{roomId}', function ($user, string $roomId) {
         'role'        => $guest['role'] ?? 'spectator',
     ];
 });
+
+// Private per-player game channel — used to send drawer-only events (e.g. pict.word_hint)
+Broadcast::channel('game.{gameId}.{channelGuestId}', function ($user, string $gameId, string $channelGuestId) {
+    $guestId = Request::header('X-Guest-ID');
+    return $guestId === $channelGuestId;
+});

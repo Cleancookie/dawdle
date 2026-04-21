@@ -67,7 +67,7 @@ function useCountdown(initialSeconds, onExpire) {
 // Main Pictionary component
 // ---------------------------------------------------------------------------
 function PictionaryApp({ config, eventBus, emit }) {
-    const { guestId, players, role: roomRole } = config;
+    const { guestId, gameId, players, role: roomRole } = config;
 
     // Find display name helper
     const allParticipants = [...players, ...(config.spectators ?? [])];
@@ -117,7 +117,7 @@ function PictionaryApp({ config, eventBus, emit }) {
                     round: payload.round,
                     totalRounds: payload.totalRounds,
                     drawerGuestId: payload.drawerGuestId,
-                    word: payload.word ?? null,   // only set for the drawer
+                    word: null,   // fetched via HTTP below when this client is the drawer
                     timeLimit: payload.timeLimit,
                 });
                 setStrokes([]);
@@ -125,6 +125,8 @@ function PictionaryApp({ config, eventBus, emit }) {
                 setGuessedCorrect(null);
                 setInputDisabled(false);
                 setOverlay(null);
+            } else if (name === 'pict.word_hint') {
+                // Unused — word is fetched via HTTP; kept for forward compatibility
             } else if (name === 'pict.stroke') {
                 // Guesser/spectator receives completed strokes from server relay
                 const path = strokeToPath(
@@ -166,6 +168,19 @@ function PictionaryApp({ config, eventBus, emit }) {
             }
         };
     }, [guestId, eventBus]);
+
+    // Fetch word from server when this client is the drawer for the current round
+    useEffect(() => {
+        if (!round || round.drawerGuestId !== guestId || round.word) return;
+        fetch(`/api/v1/games/${gameId}/word`, {
+            headers: { 'X-Guest-ID': guestId, 'Accept': 'application/json' },
+        })
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => {
+                if (data?.word) setRound((prev) => prev ? { ...prev, word: data.word } : prev);
+            })
+            .catch(() => {});
+    }, [round?.round, round?.drawerGuestId, guestId, gameId]);
 
     // ------------------------------------------------------------------
     // Drawing handlers (drawer only)

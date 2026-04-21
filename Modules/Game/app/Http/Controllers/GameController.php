@@ -40,4 +40,24 @@ class GameController extends Controller
 
         return response()->json($state);
     }
+
+    public function word(Request $request, string $gameId): JsonResponse
+    {
+        $guestId = $request->header('X-Guest-ID');
+        $state   = $this->gameService->getState($gameId);
+
+        if ($state === null) {
+            return response()->json(['error' => 'Game not found'], 404);
+        }
+
+        if (($state['gameType'] ?? '') !== 'pictionary') {
+            return response()->json(['error' => 'Not a Pictionary game'], 422);
+        }
+
+        if ($state['currentDrawer'] !== $guestId) {
+            return response()->json(['error' => 'Only the drawer can fetch the word'], 403);
+        }
+
+        return response()->json(['word' => $state['word']]);
+    }
 }

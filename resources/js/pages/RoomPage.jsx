@@ -283,6 +283,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         return () => pictEvents.forEach((e) => channel.stopListening('.' + e));
     }, [channel, phase]);
 
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);

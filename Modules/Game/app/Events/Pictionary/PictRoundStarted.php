@@ -19,7 +19,6 @@ class PictRoundStarted implements ShouldBroadcastNow
         public int $totalRounds,
         public string $drawerGuestId,
         public string $drawerDisplayName,
-        public string $word,
         public int $timeLimit,
     ) {}
 
@@ -36,12 +35,11 @@ class PictRoundStarted implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId' => $this->gameId,
-            'round' => $this->round,
-            'totalRounds' => $this->totalRounds,
+            'gameId'        => $this->gameId,
+            'round'         => $this->round,
+            'totalRounds'   => $this->totalRounds,
             'drawerGuestId' => $this->drawerGuestId,
-            'word' => $this->word,
-            'timeLimit' => $this->timeLimit,
+            'timeLimit'     => $this->timeLimit,
             'systemMessage' => "Round {$this->round}: {$this->drawerDisplayName} is drawing!",
         ];
     }

@@ -53,17 +53,7 @@ class GameService
         broadcast(new GameStarted($roomId, $gameId, $gameType, $players, $firstTurn));
 
         if ($gameType === 'pictionary') {
-            $drawerDisplayName = $this->getDisplayName($state['currentDrawer']);
-            broadcast(new PictRoundStarted(
-                $roomId,
-                $gameId,
-                $state['round'],
-                $state['totalRounds'],
-                $state['currentDrawer'],
-                $drawerDisplayName,
-                $state['word'],
-                $state['timeLimit'],
-            ));
+            $this->broadcastRoundStarted($roomId, $gameId, $state);
         }
 
         return ['gameId' => $gameId, 'state' => $state];
@@ -206,17 +196,24 @@ class GameService
 
         Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
 
-        $drawerDisplayName = $this->getDisplayName($state['currentDrawer']);
+        $this->broadcastRoundStarted($roomId, $gameId, $state);
+    }
+
+    private function broadcastRoundStarted(string $roomId, string $gameId, array $state): void
+    {
+        $drawerGuestId     = $state['currentDrawer'];
+        $drawerDisplayName = $this->getDisplayName($drawerGuestId);
+
         broadcast(new PictRoundStarted(
             $roomId,
             $gameId,
             $state['round'],
             $state['totalRounds'],
-            $state['currentDrawer'],
+            $drawerGuestId,
             $drawerDisplayName,
-            $state['word'],
             $state['timeLimit'],
         ));
+
     }
 
     private function endGame(string $gameId, array $state): void
