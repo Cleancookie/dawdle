@@ -13,7 +13,17 @@ class GameController extends Controller
 
     public function move(Request $request, string $gameId): JsonResponse
     {
-        $request->validate(['type' => 'sometimes|string']);
+        $request->validate([
+            'type'        => 'sometimes|string|max:64',
+            'index'       => 'sometimes|integer|min:0|max:8',
+            'guess'       => 'sometimes|string|max:100',
+            'points'      => 'sometimes|array|max:200',
+            'points.*.x'  => 'sometimes|numeric|min:-10|max:610',
+            'points.*.y'  => 'sometimes|numeric|min:-10|max:410',
+            'color'       => ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'width'       => 'sometimes|integer|min:1|max:20',
+            'isEraser'    => 'sometimes|boolean',
+        ]);
         $guestId = $request->header('X-Guest-ID');
         $moveData = $request->all();
 
