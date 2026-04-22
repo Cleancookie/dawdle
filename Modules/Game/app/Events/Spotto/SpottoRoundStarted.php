@@ -20,6 +20,8 @@ class SpottoRoundStarted implements ShouldBroadcastNow
         public array  $centerCard,
         public array  $playerCards,
         public array  $symbols,
+        public array  $centerLayout = [],
+        public array  $playerLayouts = [],
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -35,12 +37,14 @@ class SpottoRoundStarted implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId'       => $this->gameId,
-            'round'        => $this->round,
-            'totalRounds'  => $this->totalRounds,
-            'centerCard'   => $this->centerCard,
-            'playerCards'  => $this->playerCards,
-            'symbols'      => $this->symbols,
+            'gameId'        => $this->gameId,
+            'round'         => $this->round,
+            'totalRounds'   => $this->totalRounds,
+            'centerCard'    => $this->centerCard,
+            'playerCards'   => $this->playerCards,
+            'symbols'       => $this->symbols,
+            'centerLayout'  => $this->centerLayout,
+            'playerLayouts' => $this->playerLayouts,
             'systemMessage' => "Round {$this->round} of {$this->totalRounds} — find the match!",
         ];
     }

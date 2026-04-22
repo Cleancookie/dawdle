@@ -88,7 +88,7 @@ class GameLogic
 
     private static function dealRound(array $state): array
     {
-        $idx                = $state['deckIdx'];
+        $idx                 = $state['deckIdx'];
         $state['centerCard'] = $state['deck'][$idx];
         $state['playerCards'] = [];
 
@@ -100,7 +100,73 @@ class GameLogic
         $state['roundWinner']   = null;
         $state['winningSymbol'] = null;
 
+        // Generate random visual layout for each card (positions, sizes, rotations)
+        $count = count($state['centerCard']); // always 6 for order-5
+        $state['centerLayout'] = self::generateLayout($count);
+        $state['playerLayouts'] = [];
+        foreach ($state['playerOrder'] as $playerId) {
+            $state['playerLayouts'][$playerId] = self::generateLayout($count);
+        }
+
         return $state;
+    }
+
+    /**
+     * Generates random (x, y, size, rotation) for each symbol slot on a card.
+     * Uses rejection sampling to ensure minimum spacing between symbols.
+     * Positions are relative to the card centre (0,0).
+     */
+    private static function generateLayout(int $count): array
+    {
+        $maxRadius   = 88;
+        $minRadius   = 18;
+        $minDist     = 54;  // minimum centre-to-centre px between symbols
+        $sizeMin     = 20;
+        $sizeMax     = 40;
+        $maxAttempts = 800;
+
+        $positions = [];
+        $attempts  = 0;
+
+        while (count($positions) < $count && $attempts < $maxAttempts) {
+            $attempts++;
+            $angle  = (mt_rand(0, 100000) / 100000) * 2 * M_PI;
+            $radius = $minRadius + mt_rand(0, $maxRadius - $minRadius);
+            $x      = (int) round(cos($angle) * $radius);
+            $y      = (int) round(sin($angle) * $radius);
+
+            $tooClose = false;
+            foreach ($positions as $pos) {
+                $dx = $x - $pos['x'];
+                $dy = $y - $pos['y'];
+                if ($dx * $dx + $dy * $dy < $minDist * $minDist) {
+                    $tooClose = true;
+                    break;
+                }
+            }
+
+            if (!$tooClose) {
+                $positions[] = [
+                    'x'        => $x,
+                    'y'        => $y,
+                    'size'     => mt_rand($sizeMin, $sizeMax),
+                    'rotation' => mt_rand(0, 359),
+                ];
+            }
+        }
+
+        // Evenly-spaced fallback if rejection sampling ran out of attempts
+        for ($i = count($positions); $i < $count; $i++) {
+            $angle       = ($i / $count) * 2 * M_PI;
+            $positions[] = [
+                'x'        => (int) round(cos($angle) * 75),
+                'y'        => (int) round(sin($angle) * 75),
+                'size'     => 28,
+                'rotation' => mt_rand(0, 359),
+            ];
+        }
+
+        return $positions;
     }
 
     /**

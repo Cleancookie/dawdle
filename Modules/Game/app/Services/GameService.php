@@ -11,6 +11,7 @@ use Modules\Game\Events\Pictionary\PictGuessCorrect;
 use Modules\Game\Events\Pictionary\PictRoundEnded;
 use Modules\Game\Events\Pictionary\PictRoundStarted;
 use Modules\Game\Events\Pictionary\PictStroke;
+use Modules\Game\Events\Spotto\SpottoHover;
 use Modules\Game\Events\Spotto\SpottoPointScored;
 use Modules\Game\Events\Spotto\SpottoRoundStarted;
 use Modules\Game\Events\TttMoveMade;
@@ -211,6 +212,18 @@ class GameService
     private function applySpottoMove(string $gameId, string $guestId, array $moveData, array $state): array
     {
         $type = $moveData['type'] ?? '';
+
+        if ($type === 'spotto.hover') {
+            broadcast(new SpottoHover(
+                $state['roomId'],
+                $gameId,
+                $guestId,
+                (int) ($moveData['symbolIdx'] ?? -1),
+            ))->toOthers();
+
+            return $state;
+        }
+
         if ($type !== 'spotto.guess') {
             throw new \InvalidArgumentException('Unknown move type: '.$type);
         }
@@ -252,6 +265,8 @@ class GameService
             $state['centerCard'],
             $state['playerCards'],
             $state['symbols'],
+            $state['centerLayout']  ?? [],
+            $state['playerLayouts'] ?? [],
         ));
     }
 
