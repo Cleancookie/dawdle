@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 
 const CURSOR_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 const CURSOR_LERP   = 0.12;   // lerp factor per rAF frame (~60fps) — tune for more/less tail
-const SEND_INTERVAL = 167;    // ms between outgoing whispers (~6fps)
+const SEND_INTERVAL = 83;     // ms between outgoing whispers (~12fps)
 const STALE_AFTER   = 4000;   // ms before a silent cursor is removed
 
 // ---------------------------------------------------------------------------
