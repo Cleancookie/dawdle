@@ -632,6 +632,10 @@ const styles = {
 // PictionaryGame — shell↔game contract
 // ---------------------------------------------------------------------------
 export default class PictionaryGame extends SimpleEmitter {
+    static roomConfig = {
+        showCursors: false,   // cursors over the canvas are distracting
+    };
+
     constructor(container, config) {
         super();
         // Internal event bus to push server events into the React component

@@ -432,6 +432,11 @@ const styles = {
 // SpottoGame — shell↔game contract
 // ---------------------------------------------------------------------------
 export default class SpottoGame extends SimpleEmitter {
+    static roomConfig = {
+        collapseChat: true,   // cards need the full width
+        showCursors:  true,
+    };
+
     constructor(container, config) {
         super();
         this._eventBus = new SimpleEmitter();

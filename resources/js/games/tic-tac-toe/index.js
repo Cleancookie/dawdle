@@ -173,6 +173,8 @@ class TicTacToeScene extends Scene {
 }
 
 export default class TicTacToeGame extends SimpleEmitter {
+    static roomConfig = {};   // use shell defaults
+
     constructor(container, config) {
         super();
         this._phaserGame = new PhaserGame({

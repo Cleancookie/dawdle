@@ -174,8 +174,9 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const gameRef = useRef(null);
     const pendingGameEvents = useRef([]);
     const [chatCollapsed, setChatCollapsed] = useState(false);
-    const [editingName, setEditingName] = useState(false);
-    const [nameInput, setNameInput] = useState('');
+    const [showCursors, setShowCursors]     = useState(true);
+    const [editingName, setEditingName]     = useState(false);
+    const [nameInput, setNameInput]         = useState('');
 
     function sysMsg(text) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
@@ -306,6 +307,19 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
     }, [channel]);
 
+
+    // Apply / restore game-declared room config when phase transitions
+    useEffect(() => {
+        if (phase === 'playing' && gameSession) {
+            const GameClass = GAME_MODULES[gameSession.gameType];
+            const cfg = GameClass?.roomConfig ?? {};
+            setChatCollapsed(cfg.collapseChat ?? false);
+            setShowCursors(cfg.showCursors ?? true);
+        } else {
+            setChatCollapsed(false);
+            setShowCursors(true);
+        }
+    }, [phase, gameSession?.gameType]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -605,12 +619,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 </aside>
             </div>
 
-            <CursorLayer
-                channel={channel}
-                myGuestId={guest.guestId}
-                myDisplayName={guest.displayName}
-                members={members}
-            />
+            {showCursors && (
+                <CursorLayer
+                    channel={channel}
+                    myGuestId={guest.guestId}
+                    myDisplayName={guest.displayName}
+                    members={members}
+                />
+            )}
         </div>
     );
 }
