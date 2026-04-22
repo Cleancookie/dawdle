@@ -22,7 +22,12 @@ function App() {
 
     const roomCode = path.match(/^\/room\/([A-Za-z0-9]{6})/)?.[1] ?? null;
 
-    if (roomCode) {
+    // Preserve the invite room code through the nickname-entry flow
+    if (roomCode && !guest.displayName) {
+        localStorage.setItem('dawdle_pending_room', roomCode);
+    }
+
+    if (roomCode && guest.displayName) {
         return <RoomPage guest={guest} roomCode={roomCode} navigate={navigate} />;
     }
 

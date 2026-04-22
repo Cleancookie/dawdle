@@ -15,6 +15,11 @@ export default function HomePage({ guest, navigate }) {
         const name = nameInput.trim();
         if (name) {
             guest.setDisplayName(name);
+            const pending = localStorage.getItem('dawdle_pending_room');
+            if (pending) {
+                localStorage.removeItem('dawdle_pending_room');
+                navigate('/room/' + pending);
+            }
         }
     }
 
