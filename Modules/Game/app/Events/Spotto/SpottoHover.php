@@ -17,6 +17,7 @@ class SpottoHover implements ShouldBroadcastNow
         public string $gameId,
         public string $guestId,
         public int    $symbolIdx,
+        public string $cardId,   // guestId of card owner, or 'center'
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -35,7 +36,8 @@ class SpottoHover implements ShouldBroadcastNow
             'gameId'        => $this->gameId,
             'guestId'       => $this->guestId,
             'symbolIdx'     => $this->symbolIdx,
-            'systemMessage' => "hover: {$this->guestId} → symbol {$this->symbolIdx}",
+            'cardId'        => $this->cardId,
+            'systemMessage' => "hover: {$this->guestId} on {$this->cardId} → symbol {$this->symbolIdx}",
         ];
     }
 }

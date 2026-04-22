@@ -21,7 +21,6 @@ class SimpleEmitter {
 const CARD_SIZE = 250;
 const CENTER    = CARD_SIZE / 2;
 
-// One colour per player (index into playerOrder)
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
 // ---------------------------------------------------------------------------
@@ -30,22 +29,24 @@ const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#
 function Card({
     symbolIndices,
     symbols,
-    layout,           // [{x, y, size, rotation}, …] from server, relative to card centre
+    layout,
+    cardId,           // 'center' or guestId — used to scope hover
     onSymbolClick,
-    onSymbolHover,    // (symIdx | null) → void
-    highlightIdx,     // winning symbol index
-    hoverHighlights,  // [{color, symbolIdx}, …] — other players currently hovering
-    disabled,
+    onSymbolHover,    // (symIdx | null, cardId) → void  — always enabled
+    highlightIdx,
+    hoverHighlights,  // [{ color, symbolIdx }, …]
+    disabled,         // click-only; hover always works
 }) {
     return (
         <div style={{ position: 'relative', width: CARD_SIZE, height: CARD_SIZE, flexShrink: 0 }}>
             {/* Card circle */}
             <div style={{
-                position: 'absolute', inset: 0,
+                position:     'absolute',
+                inset:        0,
                 borderRadius: '50%',
-                border: '4px solid #1f2937',
-                background: '#ffffff',
-                boxShadow: '0 6px 20px rgba(0,0,0,0.15)',
+                border:       '4px solid #1f2937',
+                background:   '#ffffff',
+                boxShadow:    '0 6px 20px rgba(0,0,0,0.15)',
             }} />
 
             {symbolIndices.map((symIdx, i) => {
@@ -57,46 +58,64 @@ function Card({
                 const rot      = pos?.rotation ?? 0;
                 const isMatch  = symIdx === highlightIdx;
 
-                // Collect any opponent hover highlights for this symbol
                 const hoverers = (hoverHighlights ?? []).filter(h => h.symbolIdx === symIdx);
-                const hoverColor = hoverers.length > 0 ? hoverers[0].color : null;
+                const firstColor = hoverers[0]?.color ?? null;
 
                 return (
-                    <div
-                        key={symIdx}
-                        onClick={() => !disabled && onSymbolClick?.(symIdx)}
-                        onMouseEnter={() => !disabled && onSymbolHover?.(symIdx)}
-                        onMouseLeave={() => !disabled && onSymbolHover?.(null)}
-                        style={{
-                            position:       'absolute',
-                            left:           x - boxSize / 2,
-                            top:            y - boxSize / 2,
-                            width:          boxSize,
-                            height:         boxSize,
-                            display:        'flex',
-                            alignItems:     'center',
-                            justifyContent: 'center',
-                            fontSize,
-                            cursor:         disabled ? 'default' : 'pointer',
-                            borderRadius:   '50%',
-                            background:     isMatch ? 'rgba(250,204,21,0.55)' : 'transparent',
-                            border:         hoverColor
-                                ? `3px solid ${hoverColor}`
-                                : isMatch
-                                    ? '2px solid #ca8a04'
-                                    : '2px solid transparent',
-                            boxShadow:      hoverColor ? `0 0 10px ${hoverColor}88` : 'none',
-                            transform:      `rotate(${rot}deg)`,
-                            transition:     'background 0.12s, border-color 0.12s, box-shadow 0.12s',
-                            userSelect:     'none',
-                            lineHeight:     1,
-                            zIndex:         1,
-                        }}
-                        onMouseDown={e => { if (!disabled) e.currentTarget.style.transform = `rotate(${rot}deg) scale(0.88)`; }}
-                        onMouseUp={e   => { e.currentTarget.style.transform = `rotate(${rot}deg) scale(1)`; }}
-                    >
-                        {symbols[symIdx]}
-                    </div>
+                    <React.Fragment key={symIdx}>
+                        {/* Downward-pointing arrows above the symbol, one per hoverer */}
+                        {hoverers.map(({ color }, hi) => (
+                            <div
+                                key={hi}
+                                style={{
+                                    position:     'absolute',
+                                    left:         x - 6 + hi * 15,
+                                    top:          y - boxSize / 2 - 20,
+                                    width:        0,
+                                    height:       0,
+                                    borderLeft:   '6px solid transparent',
+                                    borderRight:  '6px solid transparent',
+                                    borderTop:    `11px solid ${color}`,
+                                    pointerEvents: 'none',
+                                    zIndex:       3,
+                                }}
+                            />
+                        ))}
+
+                        {/* Symbol — rotated, hover always active */}
+                        <div
+                            onClick={() => !disabled && onSymbolClick?.(symIdx)}
+                            onMouseEnter={() => onSymbolHover?.(symIdx, cardId)}
+                            onMouseLeave={() => onSymbolHover?.(null, cardId)}
+                            style={{
+                                position:       'absolute',
+                                left:           x - boxSize / 2,
+                                top:            y - boxSize / 2,
+                                width:          boxSize,
+                                height:         boxSize,
+                                display:        'flex',
+                                alignItems:     'center',
+                                justifyContent: 'center',
+                                fontSize,
+                                cursor:         disabled ? 'default' : 'pointer',
+                                borderRadius:   '50%',
+                                background:     isMatch ? 'rgba(250,204,21,0.55)' : 'transparent',
+                                outline:        firstColor
+                                    ? `3px solid ${firstColor}`
+                                    : isMatch ? '2px solid #ca8a04' : 'none',
+                                outlineOffset:  firstColor ? '5px' : isMatch ? '3px' : '0',
+                                transform:      `rotate(${rot}deg)`,
+                                transition:     'background 0.12s, outline-color 0.12s',
+                                userSelect:     'none',
+                                lineHeight:     1,
+                                zIndex:         1,
+                            }}
+                            onMouseDown={e => { if (!disabled) e.currentTarget.style.transform = `rotate(${rot}deg) scale(0.88)`; }}
+                            onMouseUp={e   => { e.currentTarget.style.transform = `rotate(${rot}deg) scale(1)`; }}
+                        >
+                            {symbols[symIdx]}
+                        </div>
+                    </React.Fragment>
                 );
             })}
         </div>
@@ -118,22 +137,22 @@ function SpottoApp({ config, eventBus, emit }) {
         [allParticipants],
     );
 
-    // Map guestId → color by position in playerOrder
     const playerColorMap = useMemo(() => {
         const map = {};
         players.forEach((p, i) => { map[p.guestId] = PLAYER_COLORS[i % PLAYER_COLORS.length]; });
         return map;
     }, [players]);
 
-    const [round, setRound]             = useState(null);
-    const [scores, setScores]           = useState({});
-    const [lastPoint, setLastPoint]     = useState(null);
-    const [locked, setLocked]           = useState(false);
-    const [playerHovers, setPlayerHovers] = useState({}); // { guestId: symbolIdx }
+    const [round, setRound]               = useState(null);
+    const [scores, setScores]             = useState({});
+    const [lastPoint, setLastPoint]       = useState(null);
+    const [locked, setLocked]             = useState(false);
+    // { [guestId]: { cardId, symbolIdx } }
+    const [playerHovers, setPlayerHovers] = useState({});
 
     const lockTimer    = useRef(null);
     const hoverTimer   = useRef(null);
-    const lastHoverRef = useRef(null);
+    const lastHoverRef = useRef(null); // "cardId:symIdx"
 
     useEffect(() => {
         const handler = (name, payload) => {
@@ -152,6 +171,7 @@ function SpottoApp({ config, eventBus, emit }) {
                 setLastPoint(null);
                 setLocked(false);
                 setPlayerHovers({});
+                lastHoverRef.current = null;
                 if (lockTimer.current) clearTimeout(lockTimer.current);
             } else if (name === 'spotto.point_scored') {
                 setLastPoint({ guestId: payload.guestId, displayName: payload.displayName, symbolIdx: payload.symbolIdx });
@@ -160,7 +180,10 @@ function SpottoApp({ config, eventBus, emit }) {
                 clearTimeout(lockTimer.current);
                 lockTimer.current = setTimeout(() => setLocked(false), 3000);
             } else if (name === 'spotto.hover') {
-                setPlayerHovers(prev => ({ ...prev, [payload.guestId]: payload.symbolIdx }));
+                setPlayerHovers(prev => ({
+                    ...prev,
+                    [payload.guestId]: { cardId: payload.cardId, symbolIdx: payload.symbolIdx },
+                }));
             } else if (name === 'game.ended') {
                 emit('complete', { scores: payload.scores, winner: payload.winner });
             }
@@ -176,17 +199,25 @@ function SpottoApp({ config, eventBus, emit }) {
         emit('move', { type: 'spotto.guess', symbolIdx: symIdx });
     }, [round, locked, emit]);
 
-    // Debounced hover broadcast — only to others via backend relay
-    const handleSymbolHover = useCallback((symIdx) => {
-        if (symIdx === lastHoverRef.current) return;
-        lastHoverRef.current = symIdx;
+    // Hover works on any card — broadcasts symbolIdx + which card
+    const handleSymbolHover = useCallback((symIdx, cardId) => {
+        const key = symIdx !== null ? `${cardId}:${symIdx}` : null;
+        if (key === lastHoverRef.current) return;
+        lastHoverRef.current = key;
         clearTimeout(hoverTimer.current);
         if (symIdx !== null) {
             hoverTimer.current = setTimeout(() => {
-                emit('move', { type: 'spotto.hover', symbolIdx: symIdx });
+                emit('move', { type: 'spotto.hover', symbolIdx: symIdx, cardId });
             }, 60);
         }
     }, [emit]);
+
+    // Returns hover highlights for a given card, from all other players hovering that card
+    const hoverHighlightsForCard = useCallback((cardId) => {
+        return Object.entries(playerHovers)
+            .filter(([id, h]) => h.cardId === cardId && id !== guestId)
+            .map(([id, h]) => ({ color: playerColorMap[id] ?? '#888', symbolIdx: h.symbolIdx }));
+    }, [playerHovers, playerColorMap, guestId]);
 
     // -----------------------------------------------------------------------
     // Render
@@ -199,8 +230,8 @@ function SpottoApp({ config, eventBus, emit }) {
         );
     }
 
-    const isSpectator  = config.role === 'spectator';
-    const opponentIds  = players.map(p => p.guestId).filter(id => id !== guestId);
+    const isSpectator = config.role === 'spectator';
+    const opponentIds = players.map(p => p.guestId).filter(id => id !== guestId);
 
     const sortedScores = Object.entries(scores)
         .map(([id, score]) => ({ id, score, name: getDisplayName(id) }))
@@ -211,17 +242,6 @@ function SpottoApp({ config, eventBus, emit }) {
             ? `🎉 You got it! ${round.symbols[lastPoint.symbolIdx]}`
             : `${lastPoint.displayName} got it! ${round.symbols[lastPoint.symbolIdx]}`)
         : null;
-
-    // Build hover highlight arrays for each card
-    // Other players' hovers on MY card (broadcast to others; they'd see their own cursor naturally)
-    const hoverHighlightsForCard = (cardOwnerId) => {
-        // Show the card owner's current hover so opponents can see what they're looking at.
-        // The owner never sees their own hover echoed back (toOthers()), so this only
-        // lights up on other players' screens.
-        const symIdx = playerHovers[cardOwnerId];
-        if (symIdx === undefined) return [];
-        return [{ color: playerColorMap[cardOwnerId] ?? '#888', symbolIdx: symIdx }];
-    };
 
     return (
         <div style={styles.container}>
@@ -248,25 +268,24 @@ function SpottoApp({ config, eventBus, emit }) {
 
             {/* Cards */}
             <div style={styles.gameArea}>
-                {/* Your card (or spectator view of all cards) */}
                 {isSpectator ? (
-                    <>
-                        {Object.entries(round.playerCards ?? {}).map(([id, card]) => (
-                            <div key={id} style={styles.cardColumn}>
-                                <div style={{ ...styles.cardLabel, color: playerColorMap[id] ?? '#6b7280' }}>
-                                    {getDisplayName(id)}
-                                </div>
-                                <Card
-                                    symbolIndices={card}
-                                    symbols={round.symbols}
-                                    layout={round.playerLayouts?.[id]}
-                                    highlightIdx={lastPoint?.symbolIdx}
-                                    hoverHighlights={hoverHighlightsForCard(id)}
-                                    disabled
-                                />
+                    Object.entries(round.playerCards ?? {}).map(([id, card]) => (
+                        <div key={id} style={styles.cardColumn}>
+                            <div style={{ ...styles.cardLabel, color: playerColorMap[id] ?? '#6b7280' }}>
+                                {getDisplayName(id)}
                             </div>
-                        ))}
-                    </>
+                            <Card
+                                symbolIndices={card}
+                                symbols={round.symbols}
+                                layout={round.playerLayouts?.[id]}
+                                cardId={id}
+                                onSymbolHover={handleSymbolHover}
+                                highlightIdx={lastPoint?.symbolIdx}
+                                hoverHighlights={hoverHighlightsForCard(id)}
+                                disabled
+                            />
+                        </div>
+                    ))
                 ) : (
                     <div style={styles.cardColumn}>
                         <div style={{ ...styles.cardLabel, color: playerColorMap[guestId] ?? '#6b7280' }}>
@@ -276,6 +295,7 @@ function SpottoApp({ config, eventBus, emit }) {
                             symbolIndices={round.myCard}
                             symbols={round.symbols}
                             layout={round.myLayout}
+                            cardId={guestId}
                             onSymbolClick={handleSymbolClick}
                             onSymbolHover={handleSymbolHover}
                             highlightIdx={lastPoint?.symbolIdx}
@@ -292,7 +312,10 @@ function SpottoApp({ config, eventBus, emit }) {
                         symbolIndices={round.centerCard}
                         symbols={round.symbols}
                         layout={round.centerLayout}
+                        cardId="center"
+                        onSymbolHover={handleSymbolHover}
                         highlightIdx={lastPoint?.symbolIdx}
+                        hoverHighlights={hoverHighlightsForCard('center')}
                         disabled
                     />
                 </div>
@@ -307,6 +330,8 @@ function SpottoApp({ config, eventBus, emit }) {
                             symbolIndices={round.playerCards[id] ?? []}
                             symbols={round.symbols}
                             layout={round.playerLayouts?.[id]}
+                            cardId={id}
+                            onSymbolHover={handleSymbolHover}
                             highlightIdx={lastPoint?.symbolIdx}
                             hoverHighlights={hoverHighlightsForCard(id)}
                             disabled
@@ -315,7 +340,6 @@ function SpottoApp({ config, eventBus, emit }) {
                 ))}
             </div>
 
-            {/* Hint */}
             {!isSpectator && !locked && (
                 <div style={styles.hint}>Tap the symbol that appears on both cards!</div>
             )}

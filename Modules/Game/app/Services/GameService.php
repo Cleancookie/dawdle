@@ -219,6 +219,7 @@ class GameService
                 $gameId,
                 $guestId,
                 (int) ($moveData['symbolIdx'] ?? -1),
+                (string) ($moveData['cardId'] ?? 'center'),
             ))->toOthers();
 
             return $state;
