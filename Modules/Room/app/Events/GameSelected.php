@@ -7,6 +7,7 @@ use Illuminate\Broadcasting\PresenceChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Modules\Game\Enums\GameType;
 
 class GameSelected implements ShouldBroadcastNow
 {
@@ -26,8 +27,7 @@ class GameSelected implements ShouldBroadcastNow
 
     public function broadcastWith(): array
     {
-        $labels = ['tic_tac_toe' => 'Tic Tac Toe', 'pictionary' => 'Pictionary'];
-        $label = $labels[$this->gameType] ?? $this->gameType;
+        $label = GameType::tryFrom($this->gameType)?->label() ?? $this->gameType;
         return [
             'gameType'      => $this->gameType,
             'systemMessage' => "Host changed the game to {$label}",

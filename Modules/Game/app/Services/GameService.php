@@ -4,6 +4,7 @@ namespace Modules\Game\Services;
 
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
+use Modules\Game\Enums\GameType;
 use Modules\Game\Events\GameEnded;
 use Modules\Game\Events\Pictionary\PictCanvasClear;
 use Modules\Game\Events\Pictionary\PictGuessCorrect;
@@ -36,35 +37,33 @@ class GameService
         ]);
         $gameId = $session->id;
 
-        if ($gameType === 'tic_tac_toe') {
-            shuffle($playerGuestIds);
-            $playerX = $playerGuestIds[0];
-            $playerO = $playerGuestIds[1];
-            $state = TttGameLogic::initialState($gameId, $roomId, $playerX, $playerO);
-            $players = [['guestId' => $playerX], ['guestId' => $playerO]];
-            $firstTurn = $playerX;
-        } elseif ($gameType === 'pictionary') {
-            $state = PictGameLogic::initialState($gameId, $roomId, $playerGuestIds);
-            $players = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
-            $firstTurn = $state['currentDrawer'];
-        } elseif ($gameType === 'spotto') {
-            $state = SpottoGameLogic::initialState($gameId, $roomId, $playerGuestIds);
-            $players = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
-            $firstTurn = null;
-        } else {
-            throw new \InvalidArgumentException('Unsupported game type');
-        }
+        [$state, $players, $firstTurn] = match(GameType::from($gameType)) {
+            GameType::TicTacToe => (static function () use ($gameId, $roomId, $playerGuestIds) {
+                shuffle($playerGuestIds);
+                [$playerX, $playerO] = $playerGuestIds;
+                $state = TttGameLogic::initialState($gameId, $roomId, $playerX, $playerO);
+                return [$state, [['guestId' => $playerX], ['guestId' => $playerO]], $playerX];
+            })(),
+            GameType::Pictionary => (static function () use ($gameId, $roomId, $playerGuestIds) {
+                $state = PictGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+                return [$state, array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']), $state['currentDrawer']];
+            })(),
+            GameType::Spotto => (static function () use ($gameId, $roomId, $playerGuestIds) {
+                $state = SpottoGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+                return [$state, array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']), null];
+            })(),
+        };
 
         Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
         $this->roomService->setStatus($roomId, 'playing');
 
         broadcast(new GameStarted($roomId, $gameId, $gameType, $players, $firstTurn));
 
-        if ($gameType === 'pictionary') {
-            $this->broadcastRoundStarted($roomId, $gameId, $state);
-        } elseif ($gameType === 'spotto') {
-            $this->broadcastSpottoRoundStarted($roomId, $gameId, $state);
-        }
+        match(GameType::from($gameType)) {
+            GameType::Pictionary => $this->broadcastRoundStarted($roomId, $gameId, $state),
+            GameType::Spotto     => $this->broadcastSpottoRoundStarted($roomId, $gameId, $state),
+            default              => null,
+        };
 
         return ['gameId' => $gameId, 'state' => $state];
     }
@@ -79,19 +78,11 @@ class GameService
         $state = json_decode($raw, true);
         $gameType = $state['gameType'];
 
-        if ($gameType === 'tic_tac_toe') {
-            return $this->applyTttMove($gameId, $guestId, $moveData, $state);
-        }
-
-        if ($gameType === 'pictionary') {
-            return $this->applyPictionaryMove($gameId, $guestId, $moveData, $state);
-        }
-
-        if ($gameType === 'spotto') {
-            return $this->applySpottoMove($gameId, $guestId, $moveData, $state);
-        }
-
-        throw new \RuntimeException('Unknown game type: '.$gameType);
+        return match(GameType::from($gameType)) {
+            GameType::TicTacToe  => $this->applyTttMove($gameId, $guestId, $moveData, $state),
+            GameType::Pictionary => $this->applyPictionaryMove($gameId, $guestId, $moveData, $state),
+            GameType::Spotto     => $this->applySpottoMove($gameId, $guestId, $moveData, $state),
+        };
     }
 
     public function getState(string $gameId): ?array
@@ -286,7 +277,9 @@ class GameService
         $session = GameSession::findOrFail($gameId);
         $roomId = $session->room_id;
 
-        if ($state['gameType'] === 'pictionary' || $state['gameType'] === 'spotto') {
+        $type = GameType::from($state['gameType']);
+
+        if ($type === GameType::Pictionary || $type === GameType::Spotto) {
             $scoresMap = $state['scores'];
             arsort($scoresMap);
             $winnerGuestId = array_key_first($scoresMap);

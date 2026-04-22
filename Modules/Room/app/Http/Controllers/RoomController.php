@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Validation\Rule;
+use Modules\Game\Enums\GameType;
 use Modules\Game\Services\GameService;
 use Modules\Room\Services\RoomService;
 
@@ -90,7 +92,7 @@ class RoomController extends Controller
 
     public function selectGame(Request $request, string $code): JsonResponse
     {
-        $request->validate(['game_type' => 'required|string|in:tic_tac_toe,pictionary,spotto']);
+        $request->validate(['game_type' => ['required', Rule::enum(GameType::class)]]);
         $guestId = $request->header('X-Guest-ID');
 
         try {

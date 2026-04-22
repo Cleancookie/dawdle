@@ -3,6 +3,7 @@
 namespace Modules\Room\Services;
 
 use Illuminate\Support\Facades\Redis;
+use Modules\Game\Enums\GameType;
 use Modules\Game\Models\GameSession;
 use Modules\Room\Events\ChatMessageSent;
 use Modules\Room\Events\PlayerJoined;
@@ -38,7 +39,7 @@ class RoomService
             'status', 'waiting',
             'code', $code,
             'hostGuestId', $guestId,
-            'selectedGame', 'tic_tac_toe',
+            'selectedGame', GameType::TicTacToe->value,
             'lastActivityAt', now()->toISOString(),
         );
         Redis::expire("dawdle:room:{$room->id}", 7200);
@@ -70,7 +71,7 @@ class RoomService
             return null;
         }
 
-        $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: 'tic_tac_toe';
+        $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: GameType::TicTacToe->value;
 
         $result = [
             'roomId'       => $room->id,
@@ -238,7 +239,7 @@ class RoomService
             throw new \InvalidArgumentException('Only the host can select the game');
         }
 
-        if (!in_array($gameType, ['tic_tac_toe', 'pictionary', 'spotto'], true)) {
+        if (GameType::tryFrom($gameType) === null) {
             throw new \InvalidArgumentException('Invalid game type');
         }
 
