@@ -3,6 +3,7 @@
 namespace Modules\Room\Services;
 
 use Illuminate\Support\Facades\Redis;
+use Modules\Game\Models\GameSession;
 use Modules\Room\Events\ChatMessageSent;
 use Modules\Room\Events\PlayerJoined;
 use Modules\Room\Events\PlayerLeft;
@@ -71,13 +72,44 @@ class RoomService
 
         $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: 'tic_tac_toe';
 
-        return [
+        $result = [
             'roomId'       => $room->id,
             'code'         => $room->code,
             'status'       => $room->status,
             'hostGuestId'  => $room->host_guest_id,
             'selectedGame' => $selectedGame,
         ];
+
+        // Include active game session so reconnecting clients can restore game phase.
+        if ($room->status === 'playing') {
+            $session = GameSession::where('room_id', $room->id)
+                ->where('status', 'in_progress')
+                ->latest('started_at')
+                ->first();
+
+            if ($session) {
+                $raw = Redis::get("dawdle:game:{$session->id}:state");
+                if ($raw !== null) {
+                    $state = json_decode($raw, true);
+                    $playerOrder = $state['playerOrder']
+                        ?? array_values($state['players'] ?? []);
+
+                    $players = array_map(
+                        fn ($id) => ['guestId' => $id],
+                        $playerOrder,
+                    );
+
+                    $result['activeGame'] = [
+                        'gameId'    => $session->id,
+                        'gameType'  => $session->game_type,
+                        'players'   => $players,
+                        'firstTurn' => $state['currentTurn'] ?? $state['currentDrawer'] ?? null,
+                    ];
+                }
+            }
+        }
+
+        return $result;
     }
 
     public function join(string $code, string $guestId, string $displayName): array
@@ -89,7 +121,11 @@ class RoomService
         }
 
         $status = Redis::hget("dawdle:room:{$room->id}", 'status') ?? $room->status;
-        $role = $status === 'waiting' ? 'player' : 'spectator';
+
+        // Determine role: preserve player status for guests reconnecting mid-game.
+        $existingGuest = Redis::hget("dawdle:guest:{$guestId}", 'roomId');
+        $wasPlayer     = Redis::sismember("dawdle:room:{$room->id}:players", $guestId);
+        $role = ($status === 'waiting' || $wasPlayer) ? 'player' : 'spectator';
 
         $existing = RoomGuest::where('room_id', $room->id)->where('guest_id', $guestId)->first();
 
@@ -202,7 +238,7 @@ class RoomService
             throw new \InvalidArgumentException('Only the host can select the game');
         }
 
-        if (!in_array($gameType, ['tic_tac_toe', 'pictionary'], true)) {
+        if (!in_array($gameType, ['tic_tac_toe', 'pictionary', 'spotto'], true)) {
             throw new \InvalidArgumentException('Invalid game type');
         }
 

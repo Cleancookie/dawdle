@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
 import { useRoom } from '../hooks/use-room';
 import TicTacToeGame from '../games/tic-tac-toe/index.js';
 import PictionaryGame from '../games/pictionary/index.jsx';
@@ -171,6 +171,9 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const chatInputRef = useRef(null);
     const gameRef = useRef(null);
     const pendingGameEvents = useRef([]);
+    const [chatCollapsed, setChatCollapsed] = useState(false);
+    const [editingName, setEditingName] = useState(false);
+    const [nameInput, setNameInput] = useState('');
 
     function sysMsg(text) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
@@ -203,6 +206,12 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                     if (res.ok) {
                         setRoom(data);
                         setSelectedGame(data.selectedGame ?? 'tic_tac_toe');
+
+                        // Reconnect mid-game: restore playing phase from server state.
+                        if (data.status === 'playing' && data.activeGame) {
+                            setGameSession(data.activeGame);
+                            setPhase('playing');
+                        }
                     } else {
                         navigate('/');
                     }
@@ -384,6 +393,19 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         }
     }
 
+    async function handleNameSave(e) {
+        e.preventDefault();
+        const trimmed = nameInput.trim();
+        if (!trimmed || trimmed === guest.displayName) { setEditingName(false); return; }
+        guest.setDisplayName(trimmed);
+        setEditingName(false);
+        await fetch('/api/v1/guests/display-name', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Guest-ID': guest.guestId },
+            body: JSON.stringify({ display_name: trimmed }),
+        }).catch(() => {});
+    }
+
     function leave() {
         if (!room) { navigate('/'); return; }
         fetch(`/api/v1/rooms/${roomCode}/leave`, {
@@ -490,45 +512,94 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 </main>
 
                 {/* Chat sidebar */}
-                <aside className="flex-[3] flex flex-col bg-white">
-                    <div className="flex-1 overflow-y-auto p-4 text-sm">
-                        {messages.length === 0 ? (
-                            <p className="text-gray-400 italic">No messages yet.</p>
-                        ) : (
-                            messages.map((msg, i) =>
-                                msg.system ? (
-                                    <div key={`sys-${msg.timestamp}-${i}`} className="mb-2 text-xs text-gray-400 italic">
-                                        {msg.text}
-                                    </div>
-                                ) : (
-                                    <div key={`${msg.timestamp}-${msg.guestId}-${i}`} className="mb-2">
-                                        <span className="font-semibold text-gray-700">{msg.displayName}</span>
-                                        <span className="text-gray-600"> {msg.message}</span>
-                                    </div>
-                                )
-                            )
-                        )}
-                        <div ref={messagesEndRef} />
-                    </div>
-                    <div className="p-3 border-t border-gray-200 flex gap-2">
-                        <input
-                            ref={chatInputRef}
-                            type="text"
-                            value={chatInput}
-                            onChange={(e) => setChatInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && sendChat()}
-                            disabled={!room}
-                            placeholder="Say something..."
-                            className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        />
+                <aside className={`flex flex-col bg-white border-l border-gray-200 transition-all ${chatCollapsed ? 'w-10' : 'flex-[3]'}`}>
+                    {/* Sidebar header: collapse toggle */}
+                    <div className="flex items-center justify-between px-2 py-2 border-b border-gray-200 shrink-0">
+                        {!chatCollapsed && <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide pl-1">Chat</span>}
                         <button
-                            onClick={sendChat}
-                            disabled={!room}
-                            className="px-3 py-2 text-sm rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            onClick={() => setChatCollapsed((v) => !v)}
+                            className="ml-auto p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                            title={chatCollapsed ? 'Expand chat' : 'Collapse chat'}
                         >
-                            Send
+                            {chatCollapsed ? '»' : '«'}
                         </button>
                     </div>
+
+                    {!chatCollapsed && (
+                        <>
+                            {/* Nickname display / edit */}
+                            <div className="px-3 py-2 border-b border-gray-100 shrink-0">
+                                {editingName ? (
+                                    <form onSubmit={handleNameSave} className="flex gap-1">
+                                        <input
+                                            autoFocus
+                                            type="text"
+                                            value={nameInput}
+                                            onChange={(e) => setNameInput(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Escape' && setEditingName(false)}
+                                            className="flex-1 min-w-0 px-2 py-1 text-sm rounded border border-gray-300 focus:outline-none focus:border-gray-400"
+                                            maxLength={32}
+                                        />
+                                        <button type="submit" className="px-2 py-1 text-xs rounded bg-gray-800 text-white hover:bg-gray-700">Save</button>
+                                        <button type="button" onClick={() => setEditingName(false)} className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-600 hover:bg-gray-200">✕</button>
+                                    </form>
+                                ) : (
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-medium text-gray-700 truncate">{guest.displayName}</span>
+                                        <button
+                                            onClick={() => { setNameInput(guest.displayName); setEditingName(true); }}
+                                            className="text-xs text-gray-400 hover:text-gray-600 shrink-0"
+                                            title="Change nickname"
+                                        >
+                                            Edit
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Messages */}
+                            <div className="flex-1 overflow-y-auto p-4 text-sm">
+                                {messages.length === 0 ? (
+                                    <p className="text-gray-400 italic">No messages yet.</p>
+                                ) : (
+                                    messages.map((msg, i) =>
+                                        msg.system ? (
+                                            <div key={`sys-${msg.timestamp}-${i}`} className="mb-2 text-xs text-gray-400 italic">
+                                                {msg.text}
+                                            </div>
+                                        ) : (
+                                            <div key={`${msg.timestamp}-${msg.guestId}-${i}`} className="mb-2">
+                                                <span className="font-semibold text-gray-700">{msg.displayName}</span>
+                                                <span className="text-gray-600"> {msg.message}</span>
+                                            </div>
+                                        )
+                                    )
+                                )}
+                                <div ref={messagesEndRef} />
+                            </div>
+
+                            {/* Chat input */}
+                            <div className="p-3 border-t border-gray-200 flex gap-2">
+                                <input
+                                    ref={chatInputRef}
+                                    type="text"
+                                    value={chatInput}
+                                    onChange={(e) => setChatInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                                    disabled={!room}
+                                    placeholder="Say something..."
+                                    className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-white text-gray-800 focus:outline-none focus:border-gray-400 disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                />
+                                <button
+                                    onClick={sendChat}
+                                    disabled={!room}
+                                    className="px-3 py-2 text-sm rounded bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    Send
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </aside>
             </div>
         </div>

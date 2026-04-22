@@ -17,7 +17,7 @@ class GameStarted implements ShouldBroadcastNow
         public string $gameId,
         public string $gameType,
         public array $players,
-        public string $firstTurn,
+        public ?string $firstTurn,
     ) {}
 
     public function broadcastOn(): PresenceChannel

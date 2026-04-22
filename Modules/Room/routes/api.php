@@ -1,9 +1,11 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Modules\Room\Http\Controllers\GuestController;
 use Modules\Room\Http\Controllers\RoomController;
 
 Route::middleware(['guest.id'])->prefix('v1')->group(function () {
+    Route::patch('guests/display-name', [GuestController::class, 'updateDisplayName']);
     Route::post('rooms', [RoomController::class, 'store']);
     Route::get('rooms/{code}', [RoomController::class, 'show']);
     Route::post('rooms/{code}/join', [RoomController::class, 'join']);
