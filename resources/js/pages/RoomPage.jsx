@@ -298,7 +298,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             'ttt.move_made',
             'pict.round_started', 'pict.stroke', 'pict.stroke_delta',
             'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
-            'spotto.round_started', 'spotto.point_scored',
+            'spotto.round_started', 'spotto.point_scored', 'spotto.hover',
         ];
         gameEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));

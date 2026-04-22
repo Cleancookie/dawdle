@@ -32,9 +32,10 @@ class SpottoHover implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId'    => $this->gameId,
-            'guestId'   => $this->guestId,
-            'symbolIdx' => $this->symbolIdx,
+            'gameId'        => $this->gameId,
+            'guestId'       => $this->guestId,
+            'symbolIdx'     => $this->symbolIdx,
+            'systemMessage' => "hover: {$this->guestId} → symbol {$this->symbolIdx}",
         ];
     }
 }

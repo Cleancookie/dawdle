@@ -215,11 +215,12 @@ function SpottoApp({ config, eventBus, emit }) {
     // Build hover highlight arrays for each card
     // Other players' hovers on MY card (broadcast to others; they'd see their own cursor naturally)
     const hoverHighlightsForCard = (cardOwnerId) => {
-        // Show hovers from all players OTHER than the card's own player
-        // (you don't need a coloured ring on your own card — your cursor is already there)
-        return Object.entries(playerHovers)
-            .filter(([id]) => id !== cardOwnerId)
-            .map(([id, symIdx]) => ({ color: playerColorMap[id] ?? '#888', symbolIdx: symIdx }));
+        // Show the card owner's current hover so opponents can see what they're looking at.
+        // The owner never sees their own hover echoed back (toOthers()), so this only
+        // lights up on other players' screens.
+        const symIdx = playerHovers[cardOwnerId];
+        if (symIdx === undefined) return [];
+        return [{ color: playerColorMap[cardOwnerId] ?? '#888', symbolIdx: symIdx }];
     };
 
     return (
