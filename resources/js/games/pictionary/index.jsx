@@ -164,6 +164,32 @@ function PictionaryApp({ config, eventBus, emit }) {
         commitFlush();
     }, [commitFlush]);
 
+    // Defined here so the event-bus useEffect below can reference it in its
+    // dependency array without hitting the temporal dead zone.
+    const scheduleFrame = useCallback(() => {
+        if (rafPending.current) return;
+        rafPending.current = true;
+        requestAnimationFrame(() => {
+            rafPending.current = false;
+            const canvas    = canvasRef.current;
+            const committed = committedRef.current;
+            if (!canvas || !committed) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+            ctx.drawImage(committed, 0, 0);
+            const pts = currentPts.current;
+            if (pts.length > 1) {
+                const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
+                drawStroke(ctx, pts, strokeColor, widthRef.current);
+            }
+            // Remote in-progress stroke preview (guesser sees drawer drawing live)
+            const remote = remoteStroke.current;
+            if (remote.pts.length > 1) {
+                drawStroke(ctx, remote.pts, remote.color, remote.width);
+            }
+        });
+    }, []);
+
     // ------------------------------------------------------------------
     // Event bus — server events land here
     // ------------------------------------------------------------------
@@ -247,30 +273,6 @@ function PictionaryApp({ config, eventBus, emit }) {
             ((clientY - rect.top)  / rect.height) * CANVAS_H,
         ];
     };
-
-    const scheduleFrame = useCallback(() => {
-        if (rafPending.current) return;
-        rafPending.current = true;
-        requestAnimationFrame(() => {
-            rafPending.current = false;
-            const canvas    = canvasRef.current;
-            const committed = committedRef.current;
-            if (!canvas || !committed) return;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-            ctx.drawImage(committed, 0, 0);
-            const pts = currentPts.current;
-            if (pts.length > 1) {
-                const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
-                drawStroke(ctx, pts, strokeColor, widthRef.current);
-            }
-            // Remote in-progress stroke preview (guesser sees drawer drawing live)
-            const remote = remoteStroke.current;
-            if (remote.pts.length > 1) {
-                drawStroke(ctx, remote.pts, remote.color, remote.width);
-            }
-        });
-    }, []);
 
     const onPointerDown = useCallback((e) => {
         if (!isDrawer || !round) return;
