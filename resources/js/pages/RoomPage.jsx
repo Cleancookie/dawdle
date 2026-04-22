@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import CursorLayer from '../components/CursorLayer';
 import { useRoom } from '../hooks/use-room';
 import TicTacToeGame from '../games/tic-tac-toe/index.js';
 import PictionaryGame from '../games/pictionary/index.jsx';
@@ -9,79 +10,6 @@ const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, s
 const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto' };
 
 // One colour per room member, assigned by join order
-const CURSOR_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
-
-// Lerp factor per frame (~60fps): 0.12 gives a ~500ms "chasing" tail — playful but legible
-const CURSOR_LERP = 0.12;
-
-function RemoteCursor({ x, y, displayName, color }) {
-    const divRef  = useRef(null);
-    const rafRef  = useRef(null);
-    const cur     = useRef({ x, y });  // displayed position, updated by rAF
-    const tgt     = useRef({ x, y });  // latest received position
-
-    // Update target whenever a new whisper arrives
-    useEffect(() => { tgt.current = { x, y }; }, [x, y]);
-
-    // rAF loop: lerp displayed position toward target each frame
-    useEffect(() => {
-        const tick = () => {
-            cur.current.x += (tgt.current.x - cur.current.x) * CURSOR_LERP;
-            cur.current.y += (tgt.current.y - cur.current.y) * CURSOR_LERP;
-            if (divRef.current) {
-                divRef.current.style.transform =
-                    `translate(${cur.current.x * window.innerWidth}px, ${cur.current.y * window.innerHeight}px)`;
-            }
-            rafRef.current = requestAnimationFrame(tick);
-        };
-        rafRef.current = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(rafRef.current);
-    }, []); // intentionally empty — runs once, reads tgt via ref
-
-    return (
-        <div
-            ref={divRef}
-            style={{
-                position:      'fixed',
-                left:          0,
-                top:           0,
-                transform:     `translate(${x * window.innerWidth}px, ${y * window.innerHeight}px)`,
-                pointerEvents: 'none',
-                zIndex:        9999,
-            }}
-        >
-            <svg
-                width="14" height="19"
-                viewBox="0 0 10 14"
-                style={{ display: 'block', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.35))' }}
-            >
-                <path
-                    d="M0 0 L0 12 L3 9 L5.5 13.5 L7 12.8 L4.5 8.5 L8.5 8.5 Z"
-                    fill={color}
-                    stroke="white"
-                    strokeWidth="0.8"
-                    strokeLinejoin="round"
-                />
-            </svg>
-            <div style={{
-                position:     'absolute',
-                left:         14,
-                top:          1,
-                background:   color,
-                color:        'white',
-                padding:      '1px 6px',
-                borderRadius: 4,
-                fontSize:     11,
-                fontWeight:   700,
-                whiteSpace:   'nowrap',
-                boxShadow:    '0 1px 3px rgba(0,0,0,0.25)',
-            }}>
-                {displayName}
-            </div>
-        </div>
-    );
-}
-
 function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
     const [linkCopied, setLinkCopied] = useState(false);
 
@@ -248,8 +176,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [chatCollapsed, setChatCollapsed] = useState(false);
     const [editingName, setEditingName] = useState(false);
     const [nameInput, setNameInput] = useState('');
-    const [cursors, setCursors] = useState({}); // { [guestId]: { x, y, displayName, lastSeen } }
-    const lastCursorSentRef = useRef(0);
 
     function sysMsg(text) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
@@ -380,52 +306,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
     }, [channel]);
 
-
-    // Assign a stable colour to each room member by join order
-    const memberColorMap = useMemo(() => {
-        const map = {};
-        members.forEach((m, i) => { map[m.id] = CURSOR_COLORS[i % CURSOR_COLORS.length]; });
-        return map;
-    }, [members]);
-
-    // Send cursor position via Echo whisper (peer-to-peer, no server round-trip)
-    const handleMouseMove = useCallback((e) => {
-        if (!channel) return;
-        const now = Date.now();
-        if (now - lastCursorSentRef.current < 167) return; // ~6 fps
-        lastCursorSentRef.current = now;
-        channel.whisper('cursor', {
-            guestId:     guest.guestId,
-            displayName: guest.displayName,
-            x:           e.clientX / window.innerWidth,
-            y:           e.clientY / window.innerHeight,
-        });
-    }, [channel, guest.guestId, guest.displayName]);
-
-    // Receive cursors + expire stale ones
-    useEffect(() => {
-        if (!channel) return;
-        channel.listenForWhisper('cursor', ({ guestId, displayName, x, y }) => {
-            if (guestId === guest.guestId) return;
-            setCursors(prev => ({
-                ...prev,
-                [guestId]: { x, y, displayName, lastSeen: Date.now() },
-            }));
-        });
-        const cleanup = setInterval(() => {
-            const cutoff = Date.now() - 4000;
-            setCursors(prev => {
-                const next = Object.fromEntries(
-                    Object.entries(prev).filter(([, c]) => c.lastSeen > cutoff)
-                );
-                return Object.keys(next).length === Object.keys(prev).length ? prev : next;
-            });
-        }, 1000);
-        return () => {
-            channel.stopListeningForWhisper('cursor');
-            clearInterval(cleanup);
-        };
-    }, [channel, guest.guestId]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -578,7 +458,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const gameConfig = phase === 'playing' ? buildGameConfig() : null;
 
     return (
-        <div className="flex flex-col h-screen bg-gray-50" onMouseMove={handleMouseMove}>
+        <div className="flex flex-col h-screen bg-gray-50">
             {/* Header */}
             <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shrink-0">
                 <div className="flex items-center gap-3">
@@ -725,16 +605,12 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 </aside>
             </div>
 
-            {/* Remote cursors — fixed overlay, covers entire viewport */}
-            {Object.entries(cursors).map(([id, c]) => (
-                <RemoteCursor
-                    key={id}
-                    x={c.x}
-                    y={c.y}
-                    displayName={c.displayName}
-                    color={memberColorMap[id] ?? '#6b7280'}
-                />
-            ))}
+            <CursorLayer
+                channel={channel}
+                myGuestId={guest.guestId}
+                myDisplayName={guest.displayName}
+                members={members}
+            />
         </div>
     );
 }
