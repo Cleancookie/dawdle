@@ -11,17 +11,45 @@ const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spot
 // One colour per room member, assigned by join order
 const CURSOR_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
+// Lerp factor per frame (~60fps): 0.12 gives a ~500ms "chasing" tail — playful but legible
+const CURSOR_LERP = 0.12;
+
 function RemoteCursor({ x, y, displayName, color }) {
+    const divRef  = useRef(null);
+    const rafRef  = useRef(null);
+    const cur     = useRef({ x, y });  // displayed position, updated by rAF
+    const tgt     = useRef({ x, y });  // latest received position
+
+    // Update target whenever a new whisper arrives
+    useEffect(() => { tgt.current = { x, y }; }, [x, y]);
+
+    // rAF loop: lerp displayed position toward target each frame
+    useEffect(() => {
+        const tick = () => {
+            cur.current.x += (tgt.current.x - cur.current.x) * CURSOR_LERP;
+            cur.current.y += (tgt.current.y - cur.current.y) * CURSOR_LERP;
+            if (divRef.current) {
+                divRef.current.style.transform =
+                    `translate(${cur.current.x * window.innerWidth}px, ${cur.current.y * window.innerHeight}px)`;
+            }
+            rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(rafRef.current);
+    }, []); // intentionally empty — runs once, reads tgt via ref
+
     return (
-        <div style={{
-            position:      'fixed',
-            left:          0,
-            top:           0,
-            transform:     `translate(${x * 100}vw, ${y * 100}vh)`,
-            pointerEvents: 'none',
-            zIndex:        9999,
-            transition:    'transform 0.06s linear',
-        }}>
+        <div
+            ref={divRef}
+            style={{
+                position:      'fixed',
+                left:          0,
+                top:           0,
+                transform:     `translate(${x * window.innerWidth}px, ${y * window.innerHeight}px)`,
+                pointerEvents: 'none',
+                zIndex:        9999,
+            }}
+        >
             <svg
                 width="14" height="19"
                 viewBox="0 0 10 14"
@@ -36,17 +64,17 @@ function RemoteCursor({ x, y, displayName, color }) {
                 />
             </svg>
             <div style={{
-                position:   'absolute',
-                left:       14,
-                top:        1,
-                background: color,
-                color:      'white',
-                padding:    '1px 6px',
+                position:     'absolute',
+                left:         14,
+                top:          1,
+                background:   color,
+                color:        'white',
+                padding:      '1px 6px',
                 borderRadius: 4,
-                fontSize:   11,
-                fontWeight: 700,
-                whiteSpace: 'nowrap',
-                boxShadow:  '0 1px 3px rgba(0,0,0,0.25)',
+                fontSize:     11,
+                fontWeight:   700,
+                whiteSpace:   'nowrap',
+                boxShadow:    '0 1px 3px rgba(0,0,0,0.25)',
             }}>
                 {displayName}
             </div>
@@ -364,7 +392,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const handleMouseMove = useCallback((e) => {
         if (!channel) return;
         const now = Date.now();
-        if (now - lastCursorSentRef.current < 40) return; // ~25 fps
+        if (now - lastCursorSentRef.current < 167) return; // ~6 fps
         lastCursorSentRef.current = now;
         channel.whisper('cursor', {
             guestId:     guest.guestId,
