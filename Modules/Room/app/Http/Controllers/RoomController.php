@@ -90,7 +90,7 @@ class RoomController extends Controller
 
     public function selectGame(Request $request, string $code): JsonResponse
     {
-        $request->validate(['game_type' => 'required|string|in:tic_tac_toe,pictionary']);
+        $request->validate(['game_type' => 'required|string|in:tic_tac_toe,pictionary,spotto']);
         $guestId = $request->header('X-Guest-ID');
 
         try {
