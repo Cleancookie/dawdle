@@ -66,6 +66,21 @@ class GameController extends Controller
         return response()->json($state);
     }
 
+    public function join(Request $request, string $gameId): JsonResponse
+    {
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $state = $this->gameService->joinGame($gameId, $guestId);
+        } catch (\DomainException $e) {
+            return response()->json(['error' => $e->getMessage()], 403);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 404);
+        }
+
+        return response()->json(['ok' => true, 'playerCount' => count($state['playerOrder'] ?? [])]);
+    }
+
     public function word(Request $request, string $gameId): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');

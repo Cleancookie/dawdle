@@ -1,0 +1,10 @@
+{
+    "name": "Board",
+    "alias": "board",
+    "description": "Shared infinite canvas — base for tabletop-style games",
+    "keywords": [],
+    "priority": 0,
+    "providers": ["Modules\\Board\\Providers\\BoardServiceProvider"],
+    "aliases": {},
+    "files": []
+}

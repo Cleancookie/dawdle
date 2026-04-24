@@ -1,0 +1,11 @@
+{
+    "name": "TicTacToe",
+    "alias": "tictactoe",
+    "description": "Tic Tac Toe game — pure logic + broadcast events.",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\TicTacToe\\Providers\\TicTacToeServiceProvider"
+    ],
+    "files": []
+}

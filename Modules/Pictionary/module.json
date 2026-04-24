@@ -1,0 +1,11 @@
+{
+    "name": "Pictionary",
+    "alias": "pictionary",
+    "description": "Pictionary game — drawing prompts, stroke broadcasts, guesses.",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Pictionary\\Providers\\PictionaryServiceProvider"
+    ],
+    "files": []
+}

@@ -218,7 +218,7 @@ class RoomService
         $allPlayers = Redis::smembers($playersKey);
         $readyPlayers = Redis::smembers($key);
 
-        if (count($allPlayers) >= 2 && count($allPlayers) === count($readyPlayers)) {
+        if (count($allPlayers) >= 1 && count($allPlayers) === count($readyPlayers)) {
             return ['ready' => $ready, 'shouldStart' => true, 'roomId' => $roomId, 'players' => $allPlayers];
         }
 

@@ -84,7 +84,9 @@ class RoomController extends Controller
 
         if ($result['shouldStart']) {
             $gameType = Redis::hget("dawdle:room:{$result['roomId']}", 'selectedGame') ?: 'tic_tac_toe';
-            $this->gameService->startGame($result['roomId'], $result['players'], $gameType);
+            if (count($result['players']) >= $this->gameService->minPlayers($gameType)) {
+                $this->gameService->startGame($result['roomId'], $result['players'], $gameType);
+            }
         }
 
         return response()->json(['ready' => $result['ready'], 'shouldStart' => $result['shouldStart']]);

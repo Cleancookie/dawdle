@@ -4,6 +4,83 @@ A log of architectural decisions and stated opinions. Each entry can be followed
 
 ---
 
+## ADR-022 · Deployment: single VPS + Docker Compose + Caddy
+
+**Status:** Accepted
+**Date:** 2026-04-24
+**Context:** Needed a cheap, simple production deployment. WebSocket requirement (Reverb) rules out most free/serverless tiers. Considered Cloudflare Pages + VPS split.
+**Decision:** Single VPS (DigitalOcean, Ubuntu 24.04) running `docker-compose.prod.yml`. Caddy as reverse proxy — handles TLS automatically via Let's Encrypt, proxies HTTP to `app:8000` and WebSocket (`/app/*`) to `reverb:8080`. Frontend is built by `npm run build` during deploy and served by Laravel. Server bootstrapped via cloud-init on first boot. Deploys are `git pull` + `deploy/deploy.sh`.
+**Consequences:**
+- ✅ Single deployment target, no CORS, minimal infra complexity
+- ✅ Caddy handles TLS with zero config beyond the domain name
+- ✅ cloud-init gives declarative first-boot provisioning without Ansible overhead
+- ⚠️ 512MB RAM is tight — MySQL tuned with `--innodb-buffer-pool-size=64M`; 1GB swap added
+- ⚠️ No zero-downtime deploys — containers restart during deploy (~5s gap)
+- 🔮 GitHub Actions SSH deploy wired to call `deploy/deploy.sh` remotely
+
+---
+
+## ADR-021 · Game renderer choice: Phaser for spatial games, React/HTML for text-input games
+
+**Status:** Accepted
+**Date:** 2026-04-24
+**Context:** All games were initially Phaser-first. Pack (Herd Mentality clone) requires a text input field and answer list — awkward in Phaser's DOM overlay, natural in HTML.
+**Decision:** Use Phaser for games that are primarily spatial/visual (Tic Tac Toe, Pictionary, Spotto). Use React/HTML with a pure-JS engine (`main.js` + `index.jsx` pattern) for games that are primarily text-input or card/list driven (Pack). Both patterns satisfy the same shell ↔ game contract.
+**Consequences:**
+- ✅ Each game uses the renderer it's actually suited for
+- ✅ HTML games (Pack) get native accessibility, keyboard handling, and CSS animations for free
+- ⚠️ Two patterns to maintain — new contributors must choose deliberately
+- 🔮 Spotto and Pictionary are candidates for React/HTML migration (they're already using the engine/shell pattern with a thin Phaser layer)
+
+---
+
+## ADR-020 · Phaser games use Scale.RESIZE + `layout()` for responsive rendering
+
+**Status:** Accepted
+**Date:** 2026-04-24
+**Context:** Early Phaser games used fixed pixel dimensions. This caused the canvas to not fill the available space and made cursor-to-game-element alignment impossible.
+**Decision:** All Phaser games use `Scale.RESIZE` (no fixed width/height in config). A `layout()` method recalculates all positions as fractions of `this.scale.width` / `this.scale.height` and is called on `create()` and on every `scale.on('resize')` event. `shutdown()` removes the resize listener.
+**Consequences:**
+- ✅ Canvas always fills its container regardless of window size
+- ✅ All hit areas stay correctly aligned with visual elements
+- ⚠️ Every Phaser game must implement `layout()` — forgetting it means positions are only computed once
+- ⚠️ Agents writing Phaser geometry must negate sin terms for upward arcs (`cy - Math.sin(a) * r`) — screen y increases downward
+
+---
+
+## ADR-019 · Frontend pattern: engine in `main.js`, React shell in `index.jsx`
+
+**Status:** Accepted
+**Date:** 2026-04-22
+**Context:** Game frontends had grown to mix all three concerns — server-event routing, logical game state, and rendering — inside a single React component tree (`index.jsx`). This made the logic hard to read, hard to test without React, and awkward to port if a game ever moved to Phaser or another renderer.
+**Decision:** Each game under `resources/js/games/{game}/` now consists of two files:
+- `main.js` — a pure-JS `{Game}Engine` class extending a local `SimpleEmitter`. Owns game state, server-event routing (`receiveEvent`), user-action methods (`guess`, `hover`, `startStroke`, …), and internal timers. Emits `stateChanged` on every state mutation, plus per-game render events (e.g. `commitStroke`, `canvasClear`) for the shell to wire to the DOM.
+- `index.jsx` — a thin React shell. Subscribes to `engine.on('stateChanged', setState)`, delegates every user action back to engine methods, and is the only place that holds DOM/canvas refs. Also exports the outer `{Game}Game` class that satisfies the shell↔game contract (`receiveEvent`, `on('move'|'complete')`, `destroy`).
+- Tic Tac Toe is exempt: the Phaser `Scene` *is* its engine (same shape — state + event handlers + `handleServerEvent`), so splitting it is redundant.
+**Consequences:**
+- ✅ Engine is testable without React, DOM, or a browser runtime
+- ✅ Rendering layer can swap (React → Phaser → canvas-only) without touching game logic
+- ✅ Clean boundary mirrors the backend split (GameLogic.php is also pure)
+- ⚠️ Pictionary engine can't fully own the canvas hot path — it emits `commitStroke`/`remoteStrokeDelta` events that the shell applies to refs; an acceptable hybrid
+- 🔮 Migration to the Node.js scenario runner becomes trivial: import `main.js`, feed it fake `onMove`, assert on `engine.state`
+
+---
+
+## ADR-018 · Per-game nWidart modules (supersedes ADR-011)
+
+**Status:** Accepted
+**Date:** 2026-04-22
+**Context:** ADR-011 scoped the module layout to just `Room` and `Game`, with every game's logic and events living inside the `Game` module. As games have been added (Pictionary, Spotto), `Modules/Game/` has absorbed per-game `Services/{Type}/` and `Events/{Type}/` subtrees, and `GameService.php` imports from all of them. This undermines ADR-011's stated benefit — a clear boundary for future extraction — because the `Game` module is no longer one domain but several.
+**Decision:** Each game gets its own nWidart module at `Modules/{GameName}/` (`TicTacToe`, `Pictionary`, `Spotto`). Each contains only `module.json`, `composer.json`, `Providers/{Name}ServiceProvider.php`, `app/Services/GameLogic.php` (pure, zero framework), and `app/Events/*.php`. The `Game` module shrinks to cross-cutting orchestration only: `GameService` (now importing from per-game namespaces), `GameController`, `GameSession` / `GameResult` models + migrations, `GameType` enum, and the generic `GameEnded` event.
+**Consequences:**
+- ✅ Adding a game is one new module — no edits to existing game modules, just new imports in `GameService`
+- ✅ Restores the "clear extraction boundary" that ADR-011 promised
+- ✅ Events file under each game's own namespace (`Modules\Pictionary\Events\…`) matches how the logic is already namespaced on the frontend
+- ⚠️ `GameService` still knows about every game type (via the `match(GameType)` switches) — a necessary trade-off unless we register per-game handlers through the container, which adds indirection without payoff at 3 games
+- 🔮 If game-specific HTTP endpoints are ever added, they live in their own module's `routes/api.php` with a game-scoped controller
+
+---
+
 ## ADR-016 · Pictionary stroke protocol: single event instead of start/delta/end
 
 **Status:** Accepted

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Dawdle is a browser-based social gaming platform (think OMGPOP). Friends join a room via invite link, play casual games together, and chat. See `docs/SPEC.md` for the full founding specification — it is the source of truth. `docs/CONVENTIONS.md` defines coding and workflow standards. `docs/DECISIONS.md` is a running log of architectural decisions and stated opinions — consult it before making significant choices, and add to it when new decisions are made. `docs/AGENTS.md` defines the multi-agent development roster — roles, ownership, briefing templates, and the orchestration protocol.
 
-**v1 scope:** Guest-only play, invite-link rooms, per-room chat, two games (Tic Tac Toe + Pictionary), spectator support.
+**Current games:** Tic Tac Toe, Pictionary, Spotto, Pack. Guest-only play, invite-link rooms, per-room chat, spectator support.
 
 ## Stack
 
@@ -80,26 +80,44 @@ Modules/
   Room/                         ← room lifecycle, player presence, chat
     Http/Controllers/
     Models/                     ← Room, RoomGuest
-    Services/RoomService.php    ← domain logic (no HTTP concerns)
+    Services/RoomService.php
     Events/                     ← PlayerJoined, PlayerLeft, etc.
     Database/Migrations/
     Routes/api.php
     Providers/RoomServiceProvider.php
-  Game/                         ← game sessions, moves, results
-    Http/Controllers/
+  Game/                         ← cross-cutting orchestration only
+    Http/Controllers/GameController.php
     Models/                     ← GameSession, GameResult
-    Services/
-      TicTacToe/GameLogic.php   ← pure PHP, zero Laravel deps
-      Pictionary/GameLogic.php
-    Events/
+    Services/GameService.php    ← dispatches to per-game modules
+    Events/GameEnded.php        ← generic end-of-game event
+    Enums/GameType.php
     Database/Migrations/
-    Routes/api.php
-    Providers/GameServiceProvider.php
+  TicTacToe/                    ← ADR-018: each game owns its own module
+    Services/GameLogic.php      ← pure PHP, zero Laravel deps
+    Events/TttMoveMade.php
+  Pictionary/
+    Services/GameLogic.php
+    Events/                     ← PictStroke, PictRoundStarted, …
+  Spotto/
+    Services/GameLogic.php
+    Events/                     ← SpottoRoundStarted, SpottoPointScored, SpottoHover
+  Pack/
+    Services/GameLogic.php
+    Events/                     ← PackRoundStarted, PackAnswerSubmitted, PackRoundEnded
 
 resources/js/
   games/
-    tic-tac-toe/index.js        ← PhaserJS game module
-    pictionary/index.js
+    animation-tokens.js         ← shared ANIM constants (micro/standard/dramatic/settle)
+    tic-tac-toe/index.js        ← Phaser scene is the engine (Scale.RESIZE + layout())
+    pictionary/
+      main.js                   ← ADR-019: engine (pure JS)
+      index.jsx                 ← React shell + canvas refs
+    spotto/
+      main.js
+      index.jsx
+    pack/
+      main.js                   ← PackEngine (pure JS, no Phaser)
+      index.jsx                 ← React/HTML shell (ADR-021: HTML for text-input games)
   components/                   ← React shell components
   app.jsx                       ← Shell entry point
 ```
@@ -108,7 +126,7 @@ resources/js/
 
 **Module boundaries:** Each module owns its domain. Cross-module calls go through Services, never directly between Controllers or Models. The `Room` module owns chat (it shares the same Reverb channel and room lifecycle).
 
-**Game logic isolation:** `Modules/Game/Services/{Type}/GameLogic.php` must have zero framework coupling (no Laravel facades, no Eloquent, no `app()`). This is the migration path to Node.js if needed later — only these files get rewritten.
+**Game logic isolation:** `Modules/{GameName}/app/Services/GameLogic.php` must have zero framework coupling (no Laravel facades, no Eloquent, no `app()`). This is the migration path to Node.js if needed later — only these files get rewritten.
 
 **Shell owns the WebSocket:** PhaserJS game modules never manage their own WebSocket connection. The shell passes `socket` in `GameConfig` and relays moves. Games fire events; the shell sends them.
 
@@ -160,12 +178,27 @@ Game starts when all `player`-role guests have `ready: true` (minimum 2). Guests
 
 ### Adding a New Game
 
-1. Create `Modules/Game/Services/{GameType}/GameLogic.php` (pure logic, no Laravel deps)
-2. Create `resources/js/games/{game-type}/index.js` implementing the shell contract
-3. Register the game type in the game registry (one place in the shell)
-4. Add the game type to the `game_sessions.game_type` enum in the migration
+1. Create a new nWidart module `Modules/{GameName}/` with `module.json`, `composer.json`, `Providers/{Name}ServiceProvider.php`, `app/Services/GameLogic.php` (pure), and event classes under `app/Events/`
+2. Enable the module in `modules_statuses.json`, then `docker compose exec app composer dump-autoload`
+3. Create `resources/js/games/{kebab-name}/main.js` (pure-JS engine extending a local `SimpleEmitter`) and `index.jsx` (thin React shell — or a Phaser scene, as in TicTacToe). Use Phaser for spatial/visual games, React/HTML for text-input-heavy games (see ADR-021).
+4. Import from the new namespaces in `Modules/Game/Services/GameService.php` and add a branch to the dispatch `match` statements
+5. Register the game type in `resources/js/pages/RoomPage.jsx` (`GAME_MODULES` + `GAME_LABELS`)
+6. **Add the game's broadcast event names to the `gameEvents` array in `RoomPage.jsx`** — missing this silently drops all server events before they reach the game engine
+7. Add the game type to `Modules/Game/app/Enums/GameType.php` and to the `game_sessions.game_type` enum via a migration
 
-No other changes required — the shell and room system are game-agnostic.
+## Deployment
+
+Production runs on a single VPS (Ubuntu 24.04) using `docker-compose.prod.yml`. Caddy handles HTTPS and reverse-proxies HTTP to `app:8000` and WebSocket (`/app/*`) to `reverb:8080`.
+
+| File | Purpose |
+|---|---|
+| `docker-compose.prod.yml` | Production services — no Vite/mailpit, adds Caddy, tuned MySQL |
+| `Caddyfile` | Reverse proxy config for `asdf.land` |
+| `.env.prod.example` | Production env template — copy to `.env` on the server |
+| `deploy/bootstrap.sh` | One-time server setup (Docker, swap, firewall, deploy user) |
+| `deploy/deploy.sh` | Ongoing deploys: git pull → build frontend → restart → migrate |
+
+Server bootstrap uses **cloud-init** (paste YAML into DigitalOcean "User Data" field on droplet creation) — see `deploy/bootstrap.sh` for equivalent shell form.
 
 # Tool Use
 

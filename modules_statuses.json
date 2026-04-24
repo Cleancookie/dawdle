@@ -1,4 +1,9 @@
 {
     "Room": true,
-    "Game": true
+    "Game": true,
+    "TicTacToe": true,
+    "Pictionary": true,
+    "Spotto": true,
+    "Pack": true,
+    "Board": true
 }

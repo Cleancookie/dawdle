@@ -6,22 +6,29 @@ use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Modules\Game\Enums\GameType;
 use Modules\Game\Events\GameEnded;
-use Modules\Game\Events\Pictionary\PictCanvasClear;
-use Modules\Game\Events\Pictionary\PictGuessCorrect;
-use Modules\Game\Events\Pictionary\PictRoundEnded;
-use Modules\Game\Events\Pictionary\PictRoundStarted;
-use Modules\Game\Events\Pictionary\PictStroke;
-use Modules\Game\Events\Spotto\SpottoHover;
-use Modules\Game\Events\Spotto\SpottoPointScored;
-use Modules\Game\Events\Spotto\SpottoRoundStarted;
-use Modules\Game\Events\TttMoveMade;
+use Modules\Game\Events\GamePlayerJoined;
 use Modules\Game\Models\GameResult;
 use Modules\Game\Models\GameSession;
-use Modules\Game\Services\Pictionary\GameLogic as PictGameLogic;
-use Modules\Game\Services\Spotto\GameLogic as SpottoGameLogic;
-use Modules\Game\Services\TicTacToe\GameLogic as TttGameLogic;
+use Modules\Board\Events\BoardCursorMoved;
+use Modules\Board\Services\GameLogic as BoardGameLogic;
+use Modules\Pack\Events\PackAnswerSubmitted;
+use Modules\Pack\Events\PackRoundEnded;
+use Modules\Pack\Events\PackRoundStarted;
+use Modules\Pack\Services\GameLogic as PackGameLogic;
+use Modules\Pictionary\Events\PictCanvasClear;
+use Modules\Pictionary\Events\PictGuessCorrect;
+use Modules\Pictionary\Events\PictRoundEnded;
+use Modules\Pictionary\Events\PictRoundStarted;
+use Modules\Pictionary\Events\PictStroke;
+use Modules\Pictionary\Services\GameLogic as PictGameLogic;
 use Modules\Room\Events\GameStarted;
 use Modules\Room\Services\RoomService;
+use Modules\Spotto\Events\SpottoHover;
+use Modules\Spotto\Events\SpottoPointScored;
+use Modules\Spotto\Events\SpottoRoundStarted;
+use Modules\Spotto\Services\GameLogic as SpottoGameLogic;
+use Modules\TicTacToe\Events\TttMoveMade;
+use Modules\TicTacToe\Services\GameLogic as TttGameLogic;
 
 class GameService
 {
@@ -38,20 +45,33 @@ class GameService
         ]);
         $gameId = $session->id;
 
-        [$state, $players, $firstTurn] = match(GameType::from($gameType)) {
+        [$state, $players, $firstTurn] = match (GameType::from($gameType)) {
             GameType::TicTacToe => (static function () use ($gameId, $roomId, $playerGuestIds) {
                 shuffle($playerGuestIds);
                 [$playerX, $playerO] = $playerGuestIds;
                 $state = TttGameLogic::initialState($gameId, $roomId, $playerX, $playerO);
+
                 return [$state, [['guestId' => $playerX], ['guestId' => $playerO]], $playerX];
             })(),
             GameType::Pictionary => (static function () use ($gameId, $roomId, $playerGuestIds) {
                 $state = PictGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+
                 return [$state, array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']), $state['currentDrawer']];
             })(),
             GameType::Spotto => (static function () use ($gameId, $roomId, $playerGuestIds) {
                 $state = SpottoGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+
                 return [$state, array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']), null];
+            })(),
+            GameType::Pack => (static function () use ($gameId, $roomId, $playerGuestIds) {
+                $state = PackGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+
+                return [$state, array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']), null];
+            })(),
+            GameType::Board => (static function () use ($gameId, $roomId, $playerGuestIds) {
+                $state = BoardGameLogic::initialState($gameId, $roomId, $playerGuestIds);
+
+                return [$state, array_map(fn ($id) => ['guestId' => $id], $playerGuestIds), null];
             })(),
         };
 
@@ -60,9 +80,10 @@ class GameService
 
         broadcast(new GameStarted($roomId, $gameId, $gameType, $players, $firstTurn));
 
-        match(GameType::from($gameType)) {
+        match (GameType::from($gameType)) {
             GameType::Pictionary => $this->broadcastRoundStarted($roomId, $gameId, $state),
             GameType::Spotto     => $this->broadcastSpottoRoundStarted($roomId, $gameId, $state),
+            GameType::Pack       => $this->broadcastPackRoundStarted($roomId, $gameId, $state),
             default              => null,
         };
 
@@ -79,10 +100,12 @@ class GameService
         $state = json_decode($raw, true);
         $gameType = $state['gameType'];
 
-        return match(GameType::from($gameType)) {
+        return match (GameType::from($gameType)) {
             GameType::TicTacToe  => $this->applyTttMove($gameId, $guestId, $moveData, $state),
             GameType::Pictionary => $this->applyPictionaryMove($gameId, $guestId, $moveData, $state),
             GameType::Spotto     => $this->applySpottoMove($gameId, $guestId, $moveData, $state),
+            GameType::Pack       => $this->applyPackMove($gameId, $guestId, $moveData, $state),
+            GameType::Board      => $this->applyBoardMove($gameId, $guestId, $moveData, $state),
         };
     }
 
@@ -91,6 +114,66 @@ class GameService
         $raw = Redis::get("dawdle:game:{$gameId}:state");
 
         return $raw !== null ? json_decode($raw, true) : null;
+    }
+
+    public function joinGame(string $gameId, string $guestId): array
+    {
+        $raw = Redis::get("dawdle:game:{$gameId}:state");
+        if ($raw === null) {
+            throw new \RuntimeException('Game state not found');
+        }
+
+        $state = json_decode($raw, true);
+
+        if ($state['status'] !== 'in_progress') {
+            throw new \DomainException('Game is not in progress');
+        }
+
+        $playerOrder = $state['playerOrder'] ?? array_values($state['players'] ?? []);
+        if (in_array($guestId, $playerOrder, true)) {
+            return $state; // already a player
+        }
+
+        $max = $this->maxPlayers(GameType::from($state['gameType']));
+        if (count($playerOrder) >= $max) {
+            throw new \DomainException('Game is full');
+        }
+
+        $state['playerOrder'][] = $guestId;
+        Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+
+        $roomId      = $state['roomId'];
+        $displayName = $this->getDisplayName($guestId);
+        $players     = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
+
+        broadcast(new GamePlayerJoined($roomId, $gameId, $guestId, $displayName, $players));
+
+        // Also add to room players set so the guest is recognised as a player on reconnect
+        Redis::sadd("dawdle:room:{$roomId}:players", $guestId);
+
+        return $state;
+    }
+
+    public function minPlayers(string $gameType): int
+    {
+        return match (GameType::from($gameType)) {
+            GameType::TicTacToe  => TttGameLogic::MIN_PLAYERS,
+            GameType::Pictionary => PictGameLogic::MIN_PLAYERS,
+            GameType::Spotto     => SpottoGameLogic::MIN_PLAYERS,
+            GameType::Pack       => PackGameLogic::MIN_PLAYERS,
+            GameType::Board      => BoardGameLogic::MIN_PLAYERS,
+        };
+    }
+
+    private function maxPlayers(GameType $type): int
+    {
+        return match ($type) {
+            GameType::TicTacToe  => TttGameLogic::MAX_PLAYERS,
+            GameType::Pictionary => PictGameLogic::MAX_PLAYERS,
+            GameType::Spotto     => SpottoGameLogic::MAX_PLAYERS,
+            GameType::Pack       => PackGameLogic::MAX_PLAYERS,
+            GameType::Board      => BoardGameLogic::MAX_PLAYERS,
+        };
     }
 
     private function applyTttMove(string $gameId, string $guestId, array $moveData, array $state): array
@@ -229,7 +312,7 @@ class GameService
             throw new \InvalidArgumentException('Unknown move type: '.$type);
         }
 
-        $roomId    = $state['roomId'];
+        $roomId = $state['roomId'];
         $symbolIdx = (int) ($moveData['symbolIdx'] ?? -1);
 
         $state = SpottoGameLogic::applyGuess($state, $guestId, $symbolIdx);
@@ -266,14 +349,14 @@ class GameService
             $state['centerCard'],
             $state['playerCards'],
             $state['symbols'],
-            $state['centerLayout']  ?? [],
+            $state['centerLayout'] ?? [],
             $state['playerLayouts'] ?? [],
         ));
     }
 
     private function broadcastRoundStarted(string $roomId, string $gameId, array $state): void
     {
-        $drawerGuestId     = $state['currentDrawer'];
+        $drawerGuestId = $state['currentDrawer'];
         $drawerDisplayName = $this->getDisplayName($drawerGuestId);
 
         broadcast(new PictRoundStarted(
@@ -295,7 +378,7 @@ class GameService
 
         $type = GameType::from($state['gameType']);
 
-        if ($type === GameType::Pictionary || $type === GameType::Spotto) {
+        if (in_array($type, [GameType::Pictionary, GameType::Spotto, GameType::Pack])) {
             $scoresMap = $state['scores'];
             arsort($scoresMap);
             $winnerGuestId = array_key_first($scoresMap);
@@ -356,5 +439,120 @@ class GameService
     private function getDisplayName(string $guestId): string
     {
         return Redis::hget("dawdle:guest:{$guestId}", 'displayName') ?? 'Unknown';
+    }
+
+    // ── Pack ──────────────────────────────────────────────────────────────────
+
+    private function applyPackMove(string $gameId, string $guestId, array $moveData, array $state): array
+    {
+        $roomId = $state['roomId'];
+        $type   = $moveData['type'] ?? '';
+
+        if ($type === 'pack.answer') {
+            $state = PackGameLogic::submitAnswer($state, $guestId, $moveData['answer'] ?? '');
+
+            $answered = count($state['pendingAnswers']) + ($state['phase'] === 'reveal' ? count($state['answers']) : 0);
+            $total    = count($state['playerOrder']);
+
+            if ($state['phase'] === 'reveal') {
+                Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+                $this->broadcastPackRoundEnded($roomId, $gameId, $state);
+            } else {
+                Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+                broadcast(new PackAnswerSubmitted($roomId, $gameId, $guestId, count($state['pendingAnswers']), $total));
+            }
+
+            return $state;
+        }
+
+        if ($type === 'pack.timeout') {
+            if ($state['phase'] !== 'answering') return $state;
+            $state = PackGameLogic::revealAnswers($state);
+            Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+            $this->broadcastPackRoundEnded($roomId, $gameId, $state);
+
+            return $state;
+        }
+
+        if ($type === 'pack.advance') {
+            if ($state['phase'] !== 'reveal') return $state;
+            $state = PackGameLogic::advanceRound($state);
+            Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+
+            if ($state['status'] === 'finished') {
+                $this->endGame($gameId, $state);
+            } else {
+                $this->broadcastPackRoundStarted($roomId, $gameId, $state);
+            }
+
+            return $state;
+        }
+
+        throw new \InvalidArgumentException('Unknown move type: '.$type);
+    }
+
+    private function broadcastPackRoundEnded(string $roomId, string $gameId, array $state): void
+    {
+        $result  = $state['roundResult'] ?? [];
+        $answers = [];
+        foreach ($state['answers'] as $id => $answer) {
+            $answers[] = [
+                'guestId'  => $id,
+                'answer'   => $answer,
+                'isWinner' => in_array($id, $result['winners'] ?? []),
+            ];
+        }
+        $scores = [];
+        foreach ($state['scores'] as $id => $score) {
+            $scores[] = ['guestId' => $id, 'score' => $score];
+        }
+        broadcast(new PackRoundEnded(
+            $roomId, $gameId,
+            $state['question'],
+            $answers,
+            $result['mostCommon'] ?? null,
+            $result['winners'] ?? [],
+            $scores,
+        ));
+    }
+
+    private function broadcastPackRoundStarted(string $roomId, string $gameId, array $state): void
+    {
+        broadcast(new PackRoundStarted(
+            $roomId, $gameId,
+            $state['round'],
+            $state['totalRounds'],
+            $state['question'],
+            $state['timeLimit'],
+        ));
+    }
+
+    // ── Board ─────────────────────────────────────────────────────────────────
+
+    private function applyBoardMove(string $gameId, string $guestId, array $moveData, array $state): array
+    {
+        $roomId = $state['roomId'];
+        $type   = $moveData['type'] ?? '';
+
+        if ($type === 'board.cursor') {
+            // Cursors are ephemeral — broadcast only, no Redis write
+            broadcast(new BoardCursorMoved(
+                $roomId,
+                $guestId,
+                $this->getDisplayName($guestId),
+                (float) ($moveData['x'] ?? 0),
+                (float) ($moveData['y'] ?? 0),
+            ));
+
+            return $state;
+        }
+
+        if ($type === 'board.end') {
+            $this->endGame($gameId, $state);
+
+            return $state;
+        }
+
+        return $state;
     }
 }

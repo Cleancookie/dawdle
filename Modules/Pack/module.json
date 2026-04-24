@@ -1,0 +1,10 @@
+{
+    "name": "Pack",
+    "alias": "pack",
+    "description": "Herd mentality majority-answer game",
+    "keywords": [],
+    "priority": 0,
+    "providers": ["Modules\\Pack\\Providers\\PackServiceProvider"],
+    "aliases": {},
+    "files": []
+}

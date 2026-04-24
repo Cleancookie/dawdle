@@ -1,0 +1,7 @@
+{
+    "name": "dawdle/board",
+    "description": "Board module — shared infinite canvas",
+    "authors": [{"name": "Dawdle"}],
+    "extra": {"laravel": {"providers": ["Modules\\Board\\Providers\\BoardServiceProvider"]}},
+    "autoload": {"psr-4": {"Modules\\Board\\": "app/"}}
+}

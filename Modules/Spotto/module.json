@@ -1,0 +1,11 @@
+{
+    "name": "Spotto",
+    "alias": "spotto",
+    "description": "Spotto — projective-plane card matching game. Pure logic + events.",
+    "keywords": [],
+    "priority": 0,
+    "providers": [
+        "Modules\\Spotto\\Providers\\SpottoServiceProvider"
+    ],
+    "files": []
+}

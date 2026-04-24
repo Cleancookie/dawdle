@@ -1,0 +1,7 @@
+{
+    "name": "dawdle/pack",
+    "description": "Pack game module",
+    "authors": [{"name": "Dawdle"}],
+    "extra": {"laravel": {"providers": ["Modules\\Pack\\Providers\\PackServiceProvider"]}},
+    "autoload": {"psr-4": {"Modules\\Pack\\": "app/"}}
+}
