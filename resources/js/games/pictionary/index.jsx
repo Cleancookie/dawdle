@@ -1,13 +1,48 @@
 import ReactDOM from 'react-dom/client';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { getStroke } from 'perfect-freehand';
+import PictionaryEngine from './main.js';
 
 // ---------------------------------------------------------------------------
-// SimpleEmitter — same pattern as tic-tac-toe
+// Inject CSS keyframes once at module load
+// ---------------------------------------------------------------------------
+if (typeof document !== 'undefined') {
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes timerPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.65; transform: scale(1.12); }
+        }
+        @keyframes canvasBorderPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+            50% { box-shadow: 0 0 0 4px rgba(220,38,38,0.35); }
+        }
+        @keyframes confettiFly {
+            0%   { transform: translate(0,0) rotate(0deg); opacity: 1; }
+            100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 0; }
+        }
+        @keyframes cardBounceIn {
+            0%   { transform: scale(0.5) rotate(-3deg); opacity: 0; }
+            60%  { transform: scale(1.08) rotate(0.5deg); opacity: 1; }
+            80%  { transform: scale(0.97); }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const CANVAS_W = 800;
+const CANVAS_H = 500;
+
+// ---------------------------------------------------------------------------
+// SimpleEmitter — only needed for the outer shell class
 // ---------------------------------------------------------------------------
 class SimpleEmitter {
     constructor() { this._listeners = {}; }
-    on(event, fn) { (this._listeners[event] ??= []).push(fn); return this; }
+    on(event, fn)  { (this._listeners[event] ??= []).push(fn); return this; }
     off(event, fn) {
         const list = this._listeners[event];
         if (list) this._listeners[event] = list.filter((f) => f !== fn);
@@ -19,9 +54,6 @@ class SimpleEmitter {
 // ---------------------------------------------------------------------------
 // Canvas drawing helpers
 // ---------------------------------------------------------------------------
-const CANVAS_W = 800;
-const CANVAS_H = 500;
-
 function drawStroke(ctx, points, strokeColor, width) {
     if (points.length < 2) return;
     const outline = getStroke(points, { size: width * 3, smoothing: 0.5, thinning: 0.5 });
@@ -49,84 +81,53 @@ function makeCommitted() {
 }
 
 // ---------------------------------------------------------------------------
-// Timer hook
+// PictionaryApp — thin React shell. Owns canvas refs and toolbar UI state.
+// Subscribes to engine for logical state + canvas-ops events.
 // ---------------------------------------------------------------------------
-function useCountdown(initialSeconds, onExpire) {
-    const [seconds, setSeconds] = useState(initialSeconds);
-    const expiredRef = useRef(false);
-
-    useEffect(() => {
-        setSeconds(initialSeconds);
-        expiredRef.current = false;
-        if (!initialSeconds) return;
-
-        const interval = setInterval(() => {
-            setSeconds((s) => {
-                if (s <= 1) {
-                    clearInterval(interval);
-                    if (!expiredRef.current) {
-                        expiredRef.current = true;
-                        onExpire();
-                    }
-                    return 0;
-                }
-                return s - 1;
-            });
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [initialSeconds, onExpire]);
-
-    return seconds;
-}
-
-// ---------------------------------------------------------------------------
-// Main Pictionary component
-// ---------------------------------------------------------------------------
-function PictionaryApp({ config, eventBus, emit }) {
-    const { guestId, gameId, players, role: roomRole } = config;
-
+function PictionaryApp({ engine, config }) {
+    const { guestId, players, role: roomRole } = config;
     const allParticipants = [...players, ...(config.spectators ?? [])];
-    const getDisplayName = (id) => {
-        const p = allParticipants.find((p) => p.guestId === id);
-        return p ? p.displayName : id.slice(0, 8);
-    };
+    const getDisplayName = (id) => allParticipants.find((p) => p.guestId === id)?.displayName ?? id.slice(0, 8);
 
-    // React state — only UI, never updated during drawing
-    const [round, setRound]               = useState(null);
-    const [roundOver, setRoundOver]       = useState(null);
-    const [overlay, setOverlay]           = useState(null);
-    const [color, setColor]               = useState('#000000');
-    const [brushWidth, setBrushWidth]     = useState(4);
-    const [isEraser, setIsEraser]         = useState(false);
-    const [guessInput, setGuessInput]     = useState('');
-    const [inputDisabled, setInputDisabled] = useState(false);
+    // Mirror engine state
+    const [state, setEngineState] = useState(engine.state);
+    useEffect(() => {
+        const handler = (s) => setEngineState(s);
+        engine.on('stateChanged', handler);
+        return () => engine.off('stateChanged', handler);
+    }, [engine]);
+    const { round, roundOver, overlay, inputDisabled, timeRemaining } = state;
 
-    // Canvas refs — all drawing is direct, no React re-renders
-    const canvasRef    = useRef(null);   // visible canvas (in DOM)
-    const committedRef = useRef(null);   // offscreen canvas: all finished strokes
+    // Confetti state for correct-guess burst
+    const [confetti, setConfetti] = useState([]);
+
+    // Toolbar UI state — purely local
+    const [color, setColor]         = useState('#000000');
+    const [brushWidth, setBrushWidth] = useState(4);
+    const [isEraser, setIsEraser]   = useState(false);
+    const [guessInput, setGuessInput] = useState('');
+
+    // Canvas refs + drawing hot path (never setState during drawing)
+    const canvasRef    = useRef(null);
+    const committedRef = useRef(null);
     const currentPts   = useRef([]);
     const isDrawing    = useRef(false);
     const rafPending   = useRef(false);
-    // Keep mutable copies of toolbar state for use inside rAF/pointer callbacks
-    const colorRef      = useRef(color);
-    const widthRef      = useRef(brushWidth);
-    const eraserRef     = useRef(isEraser);
+    const remoteStroke = useRef({ strokeId: null, pts: [], color: '#000000', width: 4 });
+
+    // Keep toolbar state readable from inside rAF/pointer callbacks
+    const colorRef  = useRef(color);
+    const widthRef  = useRef(brushWidth);
+    const eraserRef = useRef(isEraser);
     useEffect(() => { colorRef.current  = color;      }, [color]);
     useEffect(() => { widthRef.current  = brushWidth; }, [brushWidth]);
     useEffect(() => { eraserRef.current = isEraser;   }, [isEraser]);
-    // Throttled delta streaming
-    const strokeIdRef    = useRef(null);
-    const lastSentIdx    = useRef(0);
-    const lastEmitTime   = useRef(0);
-    // Incoming remote stroke accumulator (guesser/spectator preview)
-    const remoteStroke   = useRef({ strokeId: null, pts: [], color: '#000000', width: 4 });
 
-    const isDrawer   = round && guestId === round.drawerGuestId;
+    const isDrawer    = round && guestId === round.drawerGuestId;
     const isSpectator = roomRole === 'spectator';
 
     // ------------------------------------------------------------------
-    // Canvas helpers — never touch React state
+    // Canvas ops — no React state touched
     // ------------------------------------------------------------------
     const commitFlush = useCallback(() => {
         const canvas    = canvasRef.current;
@@ -146,26 +147,13 @@ function PictionaryApp({ config, eventBus, emit }) {
 
     const clearCanvas = useCallback(() => {
         const committed = committedRef.current;
-        const canvas    = canvasRef.current;
-        if (!committed || !canvas) return;
-        const cCtx = committed.getContext('2d');
-        cCtx.fillStyle = '#ffffff';
-        cCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        if (!committed || !canvasRef.current) return;
+        const ctx = committed.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
         commitFlush();
     }, [commitFlush]);
 
-    // ------------------------------------------------------------------
-    // Initialise offscreen canvas when the visible canvas mounts
-    // ------------------------------------------------------------------
-    const canvasCallbackRef = useCallback((el) => {
-        canvasRef.current = el;
-        if (!el) return;
-        committedRef.current = makeCommitted();
-        commitFlush();
-    }, [commitFlush]);
-
-    // Defined here so the event-bus useEffect below can reference it in its
-    // dependency array without hitting the temporal dead zone.
     const scheduleFrame = useCallback(() => {
         if (rafPending.current) return;
         rafPending.current = true;
@@ -182,7 +170,6 @@ function PictionaryApp({ config, eventBus, emit }) {
                 const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
                 drawStroke(ctx, pts, strokeColor, widthRef.current);
             }
-            // Remote in-progress stroke preview (guesser sees drawer drawing live)
             const remote = remoteStroke.current;
             if (remote.pts.length > 1) {
                 drawStroke(ctx, remote.pts, remote.color, remote.width);
@@ -191,76 +178,65 @@ function PictionaryApp({ config, eventBus, emit }) {
     }, []);
 
     // ------------------------------------------------------------------
-    // Event bus — server events land here
+    // Wire engine events to canvas ops
     // ------------------------------------------------------------------
     useEffect(() => {
-        const handler = (name, payload) => {
-            if (name === 'pict.round_started') {
-                setRound({
-                    round: payload.round, totalRounds: payload.totalRounds,
-                    drawerGuestId: payload.drawerGuestId, word: null, timeLimit: payload.timeLimit,
-                });
-                setRoundOver(null); setOverlay(null); setInputDisabled(false);
-                clearCanvas();
-            } else if (name === 'pict.stroke') {
-                const pts   = payload.points.map((p) => [p.x, p.y]);
-                const color = payload.isEraser ? '#ffffff' : payload.color;
-                commitStroke(pts, color, payload.width);
-            } else if (name === 'pict.stroke_delta') {
-                const newPts      = payload.points.map((p) => [p.x, p.y]);
-                const strokeColor = payload.isEraser ? '#ffffff' : payload.color;
-                const remote      = remoteStroke.current;
-                if (remote.strokeId !== payload.strokeId) {
-                    remoteStroke.current = { strokeId: payload.strokeId, pts: newPts, color: strokeColor, width: payload.width };
-                } else {
-                    remoteStroke.current = { ...remote, pts: [...remote.pts, ...newPts] };
-                }
-                if (payload.final) {
-                    commitStroke(remoteStroke.current.pts, remoteStroke.current.color, remoteStroke.current.width);
-                    remoteStroke.current = { strokeId: null, pts: [], color: '#000000', width: 4 };
-                } else {
-                    scheduleFrame();
-                }
-            } else if (name === 'pict.canvas_clear') {
+        const onClear = () => {
+            remoteStroke.current = { strokeId: null, pts: [], color: '#000000', width: 4 };
+            clearCanvas();
+        };
+        const onCommit = ({ points, color, width }) => commitStroke(points, color, width);
+        const onRemoteDelta = ({ strokeId, points, color, width, final }) => {
+            const r = remoteStroke.current;
+            if (r.strokeId !== strokeId) {
+                remoteStroke.current = { strokeId, pts: points, color, width };
+            } else {
+                remoteStroke.current = { ...r, pts: [...r.pts, ...points] };
+            }
+            if (final) {
+                commitStroke(remoteStroke.current.pts, remoteStroke.current.color, remoteStroke.current.width);
                 remoteStroke.current = { strokeId: null, pts: [], color: '#000000', width: 4 };
-                clearCanvas();
-            } else if (name === 'pict.guess_correct') {
-                if (payload.guestId === guestId) {
-                    setInputDisabled(true); setOverlay('You got it!');
-                } else {
-                    setOverlay(`${payload.displayName} guessed it!`);
-                    setTimeout(() => setOverlay(null), 3000);
-                }
-            } else if (name === 'pict.round_ended') {
-                setRoundOver({ word: payload.word, scores: payload.scores });
-                setTimeout(() => { clearCanvas(); setRoundOver(null); }, 3000);
+            } else {
+                scheduleFrame();
             }
         };
-        eventBus.on('event', handler);
-        return () => eventBus.off('event', handler);
-    }, [guestId, eventBus, clearCanvas, commitStroke, scheduleFrame]);
+        const onGuessSuccess = () => {
+            setConfetti(Array.from({ length: 24 }, (_, i) => ({
+                id: i,
+                x: 45 + Math.random() * 10,
+                y: 40 + Math.random() * 10,
+                tx: (Math.random() - 0.5) * 200,
+                ty: (Math.random() - 0.5) * 160,
+                rotation: Math.random() * 720,
+                color: ['#f59e0b','#3b82f6','#10b981','#ef4444','#8b5cf6','#ec4899'][i % 6],
+                shape: Math.random() > 0.5 ? 'circle' : 'rect',
+                size: 6 + Math.random() * 6,
+            })));
+            setTimeout(() => setConfetti([]), 1200);
+        };
 
-    // Fetch word when this client becomes drawer
-    useEffect(() => {
-        if (!round || round.drawerGuestId !== guestId || round.word) return;
-        fetch(`/api/v1/games/${gameId}/word`, {
-            headers: { 'X-Guest-ID': guestId, 'Accept': 'application/json' },
-        })
-            .then((r) => r.ok ? r.json() : null)
-            .then((data) => { if (data?.word) setRound((prev) => prev ? { ...prev, word: data.word } : prev); })
-            .catch(() => {});
-    }, [round?.round, round?.drawerGuestId, guestId, gameId]);
+        engine.on('canvasClear',       onClear);
+        engine.on('commitStroke',      onCommit);
+        engine.on('remoteStrokeDelta', onRemoteDelta);
+        engine.on('guessSuccess',      onGuessSuccess);
+        return () => {
+            engine.off('canvasClear',       onClear);
+            engine.off('commitStroke',      onCommit);
+            engine.off('remoteStrokeDelta', onRemoteDelta);
+            engine.off('guessSuccess',      onGuessSuccess);
+        };
+    }, [engine, clearCanvas, commitStroke, scheduleFrame]);
+
+    // Initialise offscreen canvas once the visible canvas mounts
+    const canvasCallbackRef = useCallback((el) => {
+        canvasRef.current = el;
+        if (!el) return;
+        committedRef.current = makeCommitted();
+        commitFlush();
+    }, [commitFlush]);
 
     // ------------------------------------------------------------------
-    // Timer
-    // ------------------------------------------------------------------
-    const handleTimerExpire = useCallback(() => {
-        if (isDrawer) emit('move', { type: 'pict.timeout' });
-    }, [isDrawer, emit]);
-    const timeRemaining = useCountdown(round ? round.timeLimit : 0, handleTimerExpire);
-
-    // ------------------------------------------------------------------
-    // Pointer handlers — draw directly to canvas, no setState
+    // Pointer handlers
     // ------------------------------------------------------------------
     const getCanvasPt = (e) => {
         const canvas = canvasRef.current;
@@ -278,13 +254,11 @@ function PictionaryApp({ config, eventBus, emit }) {
         if (!isDrawer || !round) return;
         e.preventDefault();
         canvasRef.current?.setPointerCapture(e.pointerId);
+        if (!engine.startStroke()) return;
         isDrawing.current = true;
-        strokeIdRef.current  = crypto.randomUUID();
-        lastSentIdx.current  = 0;
-        lastEmitTime.current = 0;
         const pt = getCanvasPt(e);
         if (pt) currentPts.current = [pt];
-    }, [isDrawer, round]);
+    }, [isDrawer, round, engine]);
 
     const onPointerMove = useCallback((e) => {
         if (!isDrawing.current) return;
@@ -293,25 +267,12 @@ function PictionaryApp({ config, eventBus, emit }) {
         if (!pt) return;
         currentPts.current = [...currentPts.current, pt];
         scheduleFrame();
-
-        const now = Date.now();
-        if (now - lastEmitTime.current > 50) {
-            const newPts = currentPts.current.slice(lastSentIdx.current);
-            if (newPts.length > 0) {
-                lastSentIdx.current  = currentPts.current.length;
-                lastEmitTime.current = now;
-                emit('move', {
-                    type:     'pict.stroke_delta',
-                    strokeId: strokeIdRef.current,
-                    points:   newPts.map(([x, y]) => ({ x, y })),
-                    color:    eraserRef.current ? '#ffffff' : colorRef.current,
-                    width:    widthRef.current,
-                    isEraser: eraserRef.current,
-                    final:    false,
-                });
-            }
-        }
-    }, [scheduleFrame, emit]);
+        engine.maybeSendStrokeDelta(currentPts.current, {
+            color:    colorRef.current,
+            width:    widthRef.current,
+            isEraser: eraserRef.current,
+        });
+    }, [scheduleFrame, engine]);
 
     const onPointerUp = useCallback((e) => {
         if (!isDrawing.current) return;
@@ -322,35 +283,21 @@ function PictionaryApp({ config, eventBus, emit }) {
         if (!pts.length) return;
         const strokeColor = eraserRef.current ? '#ffffff' : colorRef.current;
         commitStroke(pts, strokeColor, widthRef.current);
-        // Send remaining unshipped points as the final delta
-        const remainingPts = pts.slice(lastSentIdx.current);
-        emit('move', {
-            type:     'pict.stroke_delta',
-            strokeId: strokeIdRef.current,
-            points:   remainingPts.map(([x, y]) => ({ x, y })),
-            color:    strokeColor,
+        engine.endStroke(pts, {
+            color:    colorRef.current,
             width:    widthRef.current,
             isEraser: eraserRef.current,
-            final:    true,
         });
-    }, [commitStroke, emit]);
+    }, [commitStroke, engine]);
 
     const handleClear = useCallback(() => {
-        if (!isDrawer) return;
-        clearCanvas();
         currentPts.current = [];
-        emit('move', { type: 'pict.canvas_clear' });
-    }, [isDrawer, clearCanvas, emit]);
+        engine.clearBoard();
+    }, [engine]);
 
-    // ------------------------------------------------------------------
-    // Guess
-    // ------------------------------------------------------------------
     const handleGuessSubmit = (e) => {
         e.preventDefault();
-        const trimmed = guessInput.trim();
-        if (!trimmed || inputDisabled) return;
-        emit('move', { type: 'pict.guess', guess: trimmed });
-        setGuessInput('');
+        if (engine.submitGuess(guessInput)) setGuessInput('');
     };
 
     // ------------------------------------------------------------------
@@ -365,7 +312,7 @@ function PictionaryApp({ config, eventBus, emit }) {
     }
 
     const drawerName = getDisplayName(round.drawerGuestId);
-    const timerColor = timeRemaining <= 10 ? '#dc2626' : '#374151';
+    const isWarning = timeRemaining <= 10 && timeRemaining > 0;
 
     return (
         <div style={styles.container}>
@@ -373,14 +320,23 @@ function PictionaryApp({ config, eventBus, emit }) {
                 <span style={styles.roundLabel}>
                     Round {round.round} of {round.totalRounds} — {drawerName} is drawing!
                 </span>
-                <span style={{ ...styles.timer, color: timerColor }}>{timeRemaining}s</span>
+                <span style={{
+                    ...styles.timer,
+                    color:       isWarning ? '#dc2626' : '#374151',
+                    fontWeight:  isWarning ? 700 : 600,
+                    animation:   isWarning ? 'timerPulse 600ms ease-in-out infinite' : 'none',
+                    display:     'inline-block',
+                }}>{timeRemaining}s</span>
             </div>
 
             {isDrawer && round.word && (
                 <div style={styles.word}>Draw: <strong>{round.word}</strong></div>
             )}
 
-            <div style={styles.canvasWrapper}>
+            <div style={{
+                ...styles.canvasWrapper,
+                animation: isWarning ? 'canvasBorderPulse 600ms ease-in-out infinite' : 'none',
+            }}>
                 <canvas
                     ref={canvasCallbackRef}
                     width={CANVAS_W}
@@ -395,7 +351,10 @@ function PictionaryApp({ config, eventBus, emit }) {
                 {overlay && <div style={styles.overlay}>{overlay}</div>}
                 {roundOver && (
                     <div style={styles.roundOverlay}>
-                        <div style={styles.roundOverCard}>
+                        <div key={roundOver.word} style={{
+                            ...styles.roundOverCard,
+                            animation: 'cardBounceIn 550ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                        }}>
                             <div style={styles.roundOverTitle}>Round over!</div>
                             <div style={styles.roundOverWord}>The word was: <strong>{roundOver.word}</strong></div>
                             <div style={styles.scoreList}>
@@ -407,6 +366,25 @@ function PictionaryApp({ config, eventBus, emit }) {
                                 ))}
                             </div>
                         </div>
+                    </div>
+                )}
+                {confetti.length > 0 && (
+                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+                        {confetti.map(p => (
+                            <div key={p.id} style={{
+                                position:     'absolute',
+                                left:         `${p.x}%`,
+                                top:          `${p.y}%`,
+                                width:        p.shape === 'circle' ? p.size : p.size * 1.2,
+                                height:       p.size,
+                                borderRadius: p.shape === 'circle' ? '50%' : 2,
+                                background:   p.color,
+                                animation:    'confettiFly 1.2s ease-out forwards',
+                                '--tx':       `${p.tx}px`,
+                                '--ty':       `${p.ty}px`,
+                                '--rot':      `${p.rotation}deg`,
+                            }} />
+                        ))}
                     </div>
                 )}
             </div>
@@ -459,172 +437,175 @@ function PictionaryApp({ config, eventBus, emit }) {
 // ---------------------------------------------------------------------------
 const styles = {
     container: {
-        display: 'flex',
+        display:       'flex',
         flexDirection: 'column',
-        height: '100%',
-        background: '#f9fafb',
-        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-        userSelect: 'none',
+        height:        '100%',
+        background:    '#f9fafb',
+        fontFamily:    'ui-sans-serif, system-ui, sans-serif',
+        userSelect:    'none',
     },
     waiting: {
-        margin: 'auto',
+        margin:   'auto',
         fontSize: 20,
-        color: '#6b7280',
+        color:    '#6b7280',
     },
     header: {
-        display: 'flex',
+        display:        'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '8px 16px',
-        background: '#ffffff',
-        borderBottom: '1px solid #e5e7eb',
+        alignItems:     'center',
+        padding:        '8px 16px',
+        background:     '#ffffff',
+        borderBottom:   '1px solid #e5e7eb',
+        flexWrap:       'wrap',
+        gap:            8,
     },
     roundLabel: {
-        fontSize: 16,
-        color: '#374151',
+        fontSize:   16,
+        color:      '#374151',
         fontWeight: 500,
     },
     timer: {
-        fontSize: 20,
+        fontSize:   20,
         fontWeight: 700,
-        minWidth: 48,
-        textAlign: 'right',
+        minWidth:   48,
+        textAlign:  'right',
     },
     word: {
-        padding: '6px 16px',
-        background: '#fef9c3',
+        padding:      '6px 16px',
+        background:   '#fef9c3',
         borderBottom: '1px solid #fde68a',
-        fontSize: 18,
-        color: '#92400e',
-        textAlign: 'center',
+        fontSize:     18,
+        color:        '#92400e',
+        textAlign:    'center',
     },
     canvasWrapper: {
-        flex: 1,
-        position: 'relative',
-        overflow: 'hidden',
-        display: 'flex',
+        flex:       1,
+        position:   'relative',
+        overflow:   'hidden',
+        display:    'flex',
         alignItems: 'stretch',
+        minHeight:  0,
     },
     canvas: {
-        width: '100%',
-        height: '100%',
-        display: 'block',
+        width:      '100%',
+        height:     '100%',
+        display:    'block',
         touchAction: 'none',
-        cursor: 'crosshair',
+        cursor:     'crosshair',
     },
     overlay: {
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        background: 'rgba(0,0,0,0.65)',
-        color: '#ffffff',
-        fontSize: 28,
-        fontWeight: 700,
-        padding: '16px 32px',
-        borderRadius: 12,
+        position:      'absolute',
+        top:           '50%',
+        left:          '50%',
+        transform:     'translate(-50%, -50%)',
+        background:    'rgba(0,0,0,0.65)',
+        color:         '#ffffff',
+        fontSize:      28,
+        fontWeight:    700,
+        padding:       '16px 32px',
+        borderRadius:  12,
         pointerEvents: 'none',
     },
     roundOverlay: {
-        position: 'absolute',
-        inset: 0,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
+        position:       'absolute',
+        inset:          0,
+        background:     'rgba(0,0,0,0.5)',
+        display:        'flex',
+        alignItems:     'center',
         justifyContent: 'center',
     },
     roundOverCard: {
-        background: '#ffffff',
+        background:   '#ffffff',
         borderRadius: 12,
-        padding: '24px 32px',
-        minWidth: 240,
-        textAlign: 'center',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.2)',
+        padding:      '24px 32px',
+        minWidth:     240,
+        textAlign:    'center',
+        boxShadow:    '0 4px 24px rgba(0,0,0,0.2)',
     },
     roundOverTitle: {
-        fontSize: 22,
-        fontWeight: 700,
-        color: '#374151',
+        fontSize:     22,
+        fontWeight:   700,
+        color:        '#374151',
         marginBottom: 8,
     },
     roundOverWord: {
-        fontSize: 16,
-        color: '#6b7280',
+        fontSize:     16,
+        color:        '#6b7280',
         marginBottom: 16,
     },
     scoreList: {
-        display: 'flex',
+        display:       'flex',
         flexDirection: 'column',
-        gap: 6,
+        gap:           6,
     },
     scoreRow: {
-        display: 'flex',
+        display:        'flex',
         justifyContent: 'space-between',
-        fontSize: 15,
-        color: '#374151',
+        fontSize:       15,
+        color:          '#374151',
     },
     toolbar: {
-        display: 'flex',
+        display:    'flex',
         alignItems: 'center',
-        gap: 8,
-        padding: '8px 16px',
+        gap:        8,
+        padding:    '8px 16px',
         background: '#ffffff',
-        borderTop: '1px solid #e5e7eb',
-        flexWrap: 'wrap',
+        borderTop:  '1px solid #e5e7eb',
+        flexWrap:   'wrap',
     },
     colorBtn: {
-        width: 28,
-        height: 28,
+        width:        28,
+        height:       28,
         borderRadius: '50%',
-        border: '2px solid #d1d5db',
-        cursor: 'pointer',
-        padding: 0,
+        border:       '2px solid #d1d5db',
+        cursor:       'pointer',
+        padding:      0,
     },
     separator: {
-        width: 1,
-        height: 24,
+        width:      1,
+        height:     24,
         background: '#e5e7eb',
-        margin: '0 4px',
+        margin:     '0 4px',
     },
     widthLabel: {
-        fontSize: 13,
-        color: '#6b7280',
-        display: 'flex',
+        fontSize:   13,
+        color:      '#6b7280',
+        display:    'flex',
         alignItems: 'center',
     },
     toolBtn: {
-        padding: '4px 12px',
-        fontSize: 13,
+        padding:      '4px 12px',
+        fontSize:     13,
         borderRadius: 6,
-        border: '1px solid #d1d5db',
-        cursor: 'pointer',
-        background: 'transparent',
-        color: '#374151',
+        border:       '1px solid #d1d5db',
+        cursor:       'pointer',
+        background:   'transparent',
+        color:        '#374151',
     },
     guessForm: {
-        display: 'flex',
-        gap: 8,
-        padding: '8px 16px',
+        display:    'flex',
+        gap:        8,
+        padding:    '8px 16px',
         background: '#ffffff',
-        borderTop: '1px solid #e5e7eb',
+        borderTop:  '1px solid #e5e7eb',
     },
     guessInput: {
-        flex: 1,
-        padding: '8px 12px',
-        fontSize: 15,
-        border: '1px solid #d1d5db',
+        flex:         1,
+        padding:      '8px 12px',
+        fontSize:     15,
+        border:       '1px solid #d1d5db',
         borderRadius: 6,
-        outline: 'none',
+        outline:      'none',
     },
     guessBtn: {
-        padding: '8px 20px',
-        fontSize: 15,
-        background: '#2563eb',
-        color: '#ffffff',
-        border: 'none',
+        padding:      '8px 20px',
+        fontSize:     15,
+        background:   '#2563eb',
+        color:        '#ffffff',
+        border:       'none',
         borderRadius: 6,
-        cursor: 'pointer',
-        fontWeight: 600,
+        cursor:       'pointer',
+        fontWeight:   600,
     },
 };
 
@@ -632,31 +613,25 @@ const styles = {
 // PictionaryGame — shell↔game contract
 // ---------------------------------------------------------------------------
 export default class PictionaryGame extends SimpleEmitter {
-    static roomConfig = {
-        showCursors: false,   // cursors over the canvas are distracting
-    };
+    static roomConfig = {};
+    static maxPlayers = 8;
 
     constructor(container, config) {
         super();
-        // Internal event bus to push server events into the React component
-        this._eventBus = new SimpleEmitter();
+        this._engine = new PictionaryEngine(config, (moveData) => this.emit('move', moveData));
+        this._engine.on('complete', (result) => this.emit('complete', result));
+
         this._root = ReactDOM.createRoot(container);
-        this._root.render(
-            <PictionaryApp
-                config={config}
-                eventBus={this._eventBus}
-                emit={(event, data) => this.emit(event, data)}
-            />
-        );
+        this._root.render(<PictionaryApp engine={this._engine} config={config} />);
     }
 
     receiveEvent(name, payload) {
-        this._eventBus.emit('event', name, payload);
+        this._engine.receiveEvent(name, payload);
     }
 
     destroy() {
         this._root.unmount();
-        this._eventBus.removeAllListeners();
+        this._engine.destroy();
         this.removeAllListeners();
     }
 }

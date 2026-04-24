@@ -73,18 +73,23 @@ try {
     console.log(`  Room: ${roomCode}  (${roomUrl})`);
     await shot(alice, 'alice-lobby');
 
-    // ── 3. Alice selects the game ────────────────────────────────────────────
-    console.log(`\n[3] Alice selects ${GAME}`);
+    // ── 3. Bob joins ─────────────────────────────────────────────────────────
+    console.log('\n[3] Bob joins');
+    await bob.goto(roomUrl);
+    await waitForText(bob, 'Bob');
+
+    // ── 4. Alice selects the game (after Bob joins so it broadcasts to him)
+    console.log(`\n[4] Alice selects ${GAME}`);
     const gameSelect = alice.locator('select');
     if (await gameSelect.count()) {
         await gameSelect.selectOption(GAME);
-        await alice.waitForTimeout(500);
+        // Wait for the broadcast to reach Bob's presence channel
+        await bob.waitForFunction(
+            (label) => document.body.innerText.includes(label),
+            ({ spotto: 'Spotto', pictionary: 'Pictionary', tic_tac_toe: 'Tic Tac Toe' })[GAME],
+            { timeout: 5_000 },
+        );
     }
-
-    // ── 4. Bob joins ─────────────────────────────────────────────────────────
-    console.log('\n[4] Bob joins');
-    await bob.goto(roomUrl);
-    await waitForText(bob, 'Bob');
     await shot(bob, 'bob-lobby');
 
     // ── 5. Both ready up ─────────────────────────────────────────────────────

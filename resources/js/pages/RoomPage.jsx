@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import CursorLayer from '../components/CursorLayer';
 import { useRoom } from '../hooks/use-room';
 import TicTacToeGame from '../games/tic-tac-toe/index.js';
 import PictionaryGame from '../games/pictionary/index.jsx';
 import SpottoGame from '../games/spotto/index.jsx';
+import PackGame from '../games/pack/index.jsx';
+import BoardGame from '../games/board/index.jsx';
 
-const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, spotto: SpottoGame };
+const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, spotto: SpottoGame, pack: PackGame, board: BoardGame };
 
-const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto' };
+const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto', pack: 'Pack', board: 'Board' };
 
 // One colour per room member, assigned by join order
 function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
@@ -174,7 +175,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const gameRef = useRef(null);
     const pendingGameEvents = useRef([]);
     const [chatCollapsed, setChatCollapsed] = useState(false);
-    const [showCursors, setShowCursors]     = useState(true);
     const [editingName, setEditingName]     = useState(false);
     const [nameInput, setNameInput]         = useState('');
 
@@ -272,6 +272,15 @@ export default function RoomPage({ guest, roomCode, navigate }) {
 
     useEffect(() => {
         if (!channel) return;
+        channel.listen('.game.player_joined', (data) => {
+            setGameSession((prev) => prev ? { ...prev, players: data.players } : prev);
+            gameRef.current?.receiveEvent('game.player_joined', data);
+        });
+        return () => channel.stopListening('.game.player_joined');
+    }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
         channel.listen('.game.ended', (data) => {
             gameRef.current?.receiveEvent('game.ended', data);
             pendingGameEvents.current = [];
@@ -302,6 +311,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             'pict.round_started', 'pict.stroke', 'pict.stroke_delta',
             'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
             'spotto.round_started', 'spotto.point_scored', 'spotto.hover',
+            'pack.round_started', 'pack.answer_submitted', 'pack.round_ended',
+            'board.cursor_moved',
         ];
         gameEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
@@ -314,10 +325,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             const GameClass = GAME_MODULES[gameSession.gameType];
             const cfg = GameClass?.roomConfig ?? {};
             setChatCollapsed(cfg.collapseChat ?? false);
-            setShowCursors(cfg.showCursors ?? true);
         } else {
             setChatCollapsed(false);
-            setShowCursors(true);
         }
     }, [phase, gameSession?.gameType]);
 
@@ -377,6 +386,16 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     function handlePlayAgain() {
         setPhase('lobby');
         setScores(null);
+    }
+
+    async function handleJoinGame() {
+        if (!gameSession) return;
+        await fetch(`/api/v1/games/${gameSession.gameId}/join`, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'X-Guest-ID': guest.guestId },
+        });
+        // The game.player_joined broadcast updates gameSession.players;
+        // role update is applied when gameConfig is recomputed from the new gameSession.
     }
 
     async function sendChat() {
@@ -453,6 +472,9 @@ export default function RoomPage({ guest, roomCode, navigate }) {
               }
             : {};
 
+        const GameClass = GAME_MODULES[gameType];
+        const maxPlayers = GameClass?.maxPlayers ?? 8;
+
         return {
             roomId: room?.roomId,
             gameId,
@@ -460,6 +482,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             players: mappedPlayers,
             spectators: spectatorList,
             role: playerIds.includes(guest.guestId) ? 'player' : 'spectator',
+            isHost,
+            maxPlayers,
             gameType,
             gameState,
         };
@@ -474,27 +498,27 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     return (
         <div className="flex flex-col h-screen bg-gray-50">
             {/* Header */}
-            <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shrink-0">
-                <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-lg tracking-widest text-gray-800">{roomCode}</span>
+            <header className="flex items-center justify-between px-3 sm:px-6 py-2 sm:py-3 bg-white border-b border-gray-200 shrink-0">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className="font-mono font-bold text-base sm:text-lg tracking-widest text-gray-800">{roomCode}</span>
                     {members.length > 0 && (
-                        <span className="text-sm text-gray-500">
+                        <span className="text-xs sm:text-sm text-gray-500 truncate">
                             {members.length} {members.length === 1 ? 'player' : 'players'}
                         </span>
                     )}
                 </div>
                 <button
                     onClick={leave}
-                    className="px-4 py-1.5 text-sm rounded bg-red-100 hover:bg-red-200 text-red-700 font-medium transition-colors"
+                    className="shrink-0 px-3 sm:px-4 py-1.5 text-xs sm:text-sm rounded bg-red-100 hover:bg-red-200 text-red-700 font-medium transition-colors"
                 >
                     Leave
                 </button>
             </header>
 
-            {/* Body */}
-            <div className="flex flex-1 overflow-hidden">
+            {/* Body — flex-col on mobile, flex-row on md+ */}
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden min-h-0">
                 {/* Game area */}
-                <main className="flex-[7] overflow-y-auto border-r border-gray-200">
+                <main className="flex-1 md:flex-[7] overflow-y-auto md:border-r border-gray-200 min-h-0">
                     {phase === 'lobby' && (
                         <LobbyView
                             members={members}
@@ -508,14 +532,30 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                         />
                     )}
                     {phase === 'playing' && gameConfig && (
-                        <GameArea
-                            gameType={gameSession.gameType}
-                            gameConfig={gameConfig}
-                            onMove={handleMove}
-                            onComplete={handleComplete}
-                            onMounted={handleGameMounted}
-                            gameRef={gameRef}
-                        />
+                        <div className="relative w-full h-full">
+                            <GameArea
+                                gameType={gameSession.gameType}
+                                gameConfig={gameConfig}
+                                onMove={handleMove}
+                                onComplete={handleComplete}
+                                onMounted={handleGameMounted}
+                                gameRef={gameRef}
+                            />
+                            {gameConfig.role === 'spectator' && (
+                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3
+                                    bg-gray-900/90 backdrop-blur-sm text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
+                                    <span>You're spectating</span>
+                                    {gameSession.players.length < gameConfig.maxPlayers && (
+                                        <button
+                                            onClick={handleJoinGame}
+                                            className="px-3 py-1 rounded bg-white text-gray-900 font-semibold text-xs hover:bg-gray-100 transition-colors"
+                                        >
+                                            Join game
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     )}
                     {phase === 'score' && scores && (
                         <ScoreScreen
@@ -527,8 +567,11 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                     )}
                 </main>
 
-                {/* Chat sidebar */}
-                <aside className={`flex flex-col bg-white border-l border-gray-200 transition-all ${chatCollapsed ? 'w-10' : 'flex-[3]'}`}>
+                {/* Chat — bottom drawer on mobile, sidebar on md+ */}
+                <aside className={`flex flex-col bg-white border-t border-gray-200 md:border-t-0 md:border-l transition-all shrink-0 md:shrink
+                    ${chatCollapsed
+                        ? 'h-10 md:h-auto md:w-10'
+                        : 'h-52 md:h-auto md:flex-[3]'}`}>
                     {/* Sidebar header: collapse toggle */}
                     <div className="flex items-center justify-between px-2 py-2 border-b border-gray-200 shrink-0">
                         {!chatCollapsed && <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide pl-1">Chat</span>}
@@ -537,7 +580,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             className="ml-auto p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                             title={chatCollapsed ? 'Expand chat' : 'Collapse chat'}
                         >
-                            {chatCollapsed ? '»' : '«'}
+                            <span className="md:hidden">{chatCollapsed ? '▲' : '▼'}</span>
+                            <span className="hidden md:inline">{chatCollapsed ? '»' : '«'}</span>
                         </button>
                     </div>
 
@@ -619,14 +663,6 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                 </aside>
             </div>
 
-            {showCursors && (
-                <CursorLayer
-                    channel={channel}
-                    myGuestId={guest.guestId}
-                    myDisplayName={guest.displayName}
-                    members={members}
-                />
-            )}
         </div>
     );
 }
