@@ -1,0 +1,13 @@
+asdf.land {
+    # Reverb WebSocket — /app/{key} (Pusher-compatible handshake)
+    handle /app/* {
+        reverse_proxy reverb:8080
+    }
+
+    # Everything else → Laravel (API + built frontend assets)
+    handle {
+        reverse_proxy app:8000
+    }
+
+    encode gzip
+}

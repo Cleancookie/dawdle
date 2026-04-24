@@ -1,0 +1,158 @@
+services:
+
+  # ── Caddy (HTTPS reverse proxy) ────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - reverb
+    networks:
+      - app
+
+  # ── PHP application (Laravel) ──────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - .:/var/www/html
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+      MAIL_MAILER: log
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "artisan", "--version"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app
+
+  # ── Laravel Reverb (WebSocket server) ─────────────────────────────────────
+  reverb:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    volumes:
+      - .:/var/www/html
+    env_file: .env
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: production
+      DB_HOST: mysql
+      REDIS_HOST: redis
+      BROADCAST_CONNECTION: reverb
+      REVERB_HOST: 0.0.0.0
+      REVERB_PORT: 8080
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - app
+
+  # ── Laravel queue worker ───────────────────────────────────────────────────
+  queue:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--timeout=90"]
+    volumes:
+      - .:/var/www/html
+    env_file: .env
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: production
+      DB_HOST: mysql
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - app
+
+  # ── MySQL 8 ────────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    # Tuned for low-memory (512MB) server
+    command: >
+      --innodb-buffer-pool-size=64M
+      --innodb-log-buffer-size=8M
+      --max-connections=25
+      --tmp-table-size=16M
+      --max-heap-table-size=16M
+      --query-cache-type=0
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - app
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 32mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app
+
+volumes:
+  mysql_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app:
+    driver: bridge
