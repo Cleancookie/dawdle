@@ -1,3 +1,24 @@
+/**
+ * @typedef {{ guestId: string, displayName: string, isMe: boolean }} Player
+ * @typedef {{ guestId: string, displayName: string }} Spectator
+ * @typedef {{
+ *   roomId:     string,
+ *   gameId:     string,
+ *   guestId:    string,
+ *   players:    Player[],
+ *   spectators: Spectator[],
+ *   role:       'player' | 'spectator',
+ *   isHost:     boolean,
+ *   maxPlayers: number,
+ *   gameType:   string,
+ *   gameState:  object,
+ * }} GameConfig
+ *
+ * @typedef {{ boardX: number, boardY: number, name: string, color: string }} CursorEntry
+ * @typedef {{ cursors: Record<string, CursorEntry> }} BoardState
+ * @typedef {{ type: 'board.cursor', x: number, y: number } | { type: 'board.end' }} BoardMove
+ */
+
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 export class SimpleEmitter {
@@ -12,20 +33,24 @@ export class SimpleEmitter {
 }
 
 export default class BoardEngine extends SimpleEmitter {
+    /** @param {GameConfig} config @param {function(BoardMove): void} onMove */
     constructor(config, onMove) {
         super();
         this._config  = config;
         this._onMove  = onMove;
 
+        /** @type {Record<string, string>} guestId → hex color */
         const colorMap = {};
         config.players.forEach((p, i) => {
             colorMap[p.guestId] = PLAYER_COLORS[i % PLAYER_COLORS.length];
         });
         this._colorMap = colorMap;
 
+        /** @type {BoardState} */
         this.state = { cursors: {} };
     }
 
+    /** @param {string} name @param {object} payload */
     receiveEvent(name, payload) {
         if (name === 'game.player_joined') {
             payload.players.forEach((p, i) => {
@@ -52,9 +77,11 @@ export default class BoardEngine extends SimpleEmitter {
         }
     }
 
+    /** @param {number} bx @param {number} by */
     sendCursor(bx, by) { this._onMove({ type: 'board.cursor', x: bx, y: by }); }
     endSession()        { this._onMove({ type: 'board.end' }); }
 
+    /** @param {Partial<BoardState>} patch */
     _setState(patch) {
         this.state = { ...this.state, ...patch };
         this.emit('stateChanged', this.state);

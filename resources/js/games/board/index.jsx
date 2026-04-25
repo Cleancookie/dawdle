@@ -6,6 +6,7 @@ export default class BoardGame extends SimpleEmitter {
     static roomConfig = { collapseChat: true };
     static maxPlayers = 40;
 
+    /** @param {HTMLElement} container @param {import('./engine.js').GameConfig} config */
     constructor(container, config) {
         super();
         this._engine = new BoardEngine(config, (data) => this.emit('move', data));

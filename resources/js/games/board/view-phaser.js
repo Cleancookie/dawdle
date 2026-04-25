@@ -1,3 +1,6 @@
+/** @import { GameConfig, CursorEntry } from './engine.js' */
+/** @typedef {{ container: Phaser.GameObjects.Container, gfx: Phaser.GameObjects.Graphics, label: Phaser.GameObjects.Text }} CursorObj */
+
 import { Game as PhaserGame, Scene, AUTO, Scale, Math as PMath } from 'phaser';
 
 const GRID_SIZE          = 32;
@@ -11,6 +14,11 @@ function hexToInt(hex) {
 
 // ── Scene factory ─────────────────────────────────────────────────────────────
 
+/**
+ * @param {import('./engine.js').default} engine
+ * @param {HTMLElement} domContainer
+ * @param {function(number, number): void} onCursorMove  world-space (x, y)
+ */
 function makeBoardScene(engine, domContainer, onCursorMove) {
     return class BoardScene extends Scene {
         constructor() { super('Board'); }
@@ -45,7 +53,7 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
             });
             domContainer.appendChild(this._scaleEl);
 
-            // Cursor pool { guestId → { container, gfx, label } }
+            /** @type {Record<string, CursorObj>} */
             this._cursors = {};
 
             this._setupInput(onCursorMove);
@@ -162,6 +170,7 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
 
         // ── Cursor sync ───────────────────────────────────────────────────────
 
+        /** @param {Record<string, CursorEntry>} cursors */
         _syncCursors(cursors) {
             for (const [id, obj] of Object.entries(this._cursors)) {
                 if (!cursors[id]) { obj.container.destroy(); delete this._cursors[id]; }
@@ -175,6 +184,7 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
             }
         }
 
+        /** @param {CursorEntry} c @returns {CursorObj} */
         _spawnCursor(c) {
             const col = hexToInt(c.color);
             const gfx = this.add.graphics();
