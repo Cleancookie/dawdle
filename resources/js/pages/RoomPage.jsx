@@ -170,8 +170,10 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [phase, setPhase] = useState('lobby');  // 'lobby' | 'playing' | 'score'
     const [gameSession, setGameSession] = useState(null);
     const [scores, setScores] = useState(null);
-    const messagesEndRef = useRef(null);
-    const chatInputRef = useRef(null);
+    const messagesEndRef  = useRef(null);
+    const chatInputRef    = useRef(null);
+    const moveBuffer      = useRef(new Map()); // key → moveData, for ephemeral latest-wins batching
+    const gameSessionRef  = useRef(null);
     const gameRef = useRef(null);
     const pendingGameEvents = useRef([]);
     const [chatCollapsed, setChatCollapsed] = useState(false);
@@ -181,6 +183,26 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     function sysMsg(text) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
     }
+
+    // Keep ref in sync so flush interval can read latest gameId without stale closure
+    useEffect(() => { gameSessionRef.current = gameSession; }, [gameSession]);
+
+    // Flush buffered ephemeral moves at a network-adaptive rate
+    useEffect(() => {
+        if (!gameSession) return;
+        const rates = { 'slow-2g': 800, '2g': 500, '3g': 200, '4g': 0 };
+        const batchMs = rates[navigator.connection?.effectiveType] ?? 0;
+        if (batchMs === 0) return; // fast connection — no batching needed
+
+        const timer = setInterval(() => {
+            const buf = moveBuffer.current;
+            if (buf.size === 0) return;
+            const moves = [...buf.values()];
+            buf.clear();
+            moves.forEach((m) => postMove(m));
+        }, batchMs);
+        return () => clearInterval(timer);
+    }, [gameSession?.gameId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
     const isHost = room?.hostGuestId === guest.guestId;
@@ -359,8 +381,13 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         }
     }
 
-    async function handleMove(moveData) {
-        await fetch(`/api/v1/games/${gameSession.gameId}/move`, {
+    // Ephemeral move types: only the latest position matters, safe to drop stale ones
+    const EPHEMERAL_MOVES = new Set(['board.cursor', 'board.object_drag']);
+
+    async function postMove(moveData) {
+        const session = gameSessionRef.current;
+        if (!session) return;
+        await fetch(`/api/v1/games/${session.gameId}/move`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -370,6 +397,16 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             },
             body: JSON.stringify(moveData),
         });
+    }
+
+    function handleMove(moveData) {
+        if (EPHEMERAL_MOVES.has(moveData.type) && navigator.connection?.effectiveType !== '4g') {
+            // Latest-wins: drop previous position for same event key if not yet flushed
+            const key = `${moveData.type}:${moveData.id ?? ''}`;
+            moveBuffer.current.set(key, moveData);
+        } else {
+            postMove(moveData);
+        }
     }
 
     function handleComplete() {

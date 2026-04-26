@@ -2,9 +2,14 @@
  * @import { CursorEntry, BoardObject, CameraState } from './engine.js'
  */
 
-const GRID_SIZE          = 32;
-const CURSOR_THROTTLE_MS  = 50;
-const CURSOR_TWEEN_MS     = 80;
+const GRID_SIZE = 32;
+
+// Adaptive send rate based on detected connection quality
+const { CURSOR_THROTTLE_MS, CURSOR_TWEEN_MS } = (() => {
+    const rates = { 'slow-2g': 800, '2g': 500, '3g': 200, '4g': 50 };
+    const ms = rates[navigator.connection?.effectiveType] ?? 50;
+    return { CURSOR_THROTTLE_MS: ms, CURSOR_TWEEN_MS: Math.round(ms * 1.6) };
+})();
 const CARD_W             = 64;
 const CARD_H             = 88;
 const HAND_PEEK          = 32;
