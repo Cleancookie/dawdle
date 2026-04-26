@@ -12,6 +12,7 @@ const HAND_CARD_GAP      = 6;
 const HAND_OVERLAP_X     = 20;
 const HAND_EXPAND_H      = CARD_H + HAND_PAD * 2;  // 104 — full expanded height
 const HAND_TWEEN_MS      = 180;
+const HAND_HOVER_ZONE    = 60;  // px above collapsed hand top that triggers auto-expand during drag
 
 function css(el, s) { el.style.cssText = s; }
 
@@ -185,11 +186,14 @@ export default class HtmlBoardView {
         });
     }
 
-    _toggleHand() {
-        this._expanded = !this._expanded;
-        this._handEl.style.height = `${this._expanded ? HAND_EXPAND_H : HAND_PEEK}px`;
+    _setHandExpanded(expanded) {
+        if (this._expanded === expanded) return;
+        this._expanded = expanded;
+        this._handEl.style.height = `${expanded ? HAND_EXPAND_H : HAND_PEEK}px`;
         this._layoutHand();
     }
+
+    _toggleHand() { this._setHandExpanded(!this._expanded); }
 
     _handTop() {
         return this._container.clientHeight - (this._expanded ? HAND_EXPAND_H : HAND_PEEK);
@@ -280,7 +284,7 @@ export default class HtmlBoardView {
                 this._container.setPointerCapture(e.pointerId);
                 const ghost = this._makeGhost(cardId, sx, sy);
                 this._handCards[cardId].style.opacity = '0.3';
-                this._gesture = { type: 'handDrag', id: cardId, pointerId: e.pointerId, ghost, moved: false, sx, sy };
+                this._gesture = { type: 'handDrag', id: cardId, pointerId: e.pointerId, ghost, moved: false, sx, sy, autoExpanded: false };
             } else {
                 this._gesture = { type: 'handTap', pointerId: e.pointerId, sx, sy };
             }
@@ -302,7 +306,7 @@ export default class HtmlBoardView {
                 const objWy = parseFloat(ref.el.style.top);
                 const offX  = (sx + this._scrollX) - objWx;
                 const offY  = (sy + this._scrollY) - objWy;
-                this._gesture = { type: 'boardDrag', id, pointerId: e.pointerId, offX, offY };
+                this._gesture = { type: 'boardDrag', id, pointerId: e.pointerId, offX, offY, autoExpanded: false };
                 return;
             }
         }
@@ -336,6 +340,19 @@ export default class HtmlBoardView {
             g.moved = g.moved || Math.hypot(sx - g.sx, sy - g.sy) > 6;
             g.ghost.style.left = `${sx - CARD_W / 2}px`;
             g.ghost.style.top  = `${sy - CARD_H / 2}px`;
+        }
+
+        // Auto-expand hand when dragging a card near the bottom of the screen
+        if (g.type === 'boardDrag' || g.type === 'handDrag') {
+            const collapsedHandTop = this._container.clientHeight - HAND_PEEK;
+            const nearHand = sy >= collapsedHandTop - HAND_HOVER_ZONE;
+            if (nearHand && !this._expanded) {
+                this._setHandExpanded(true);
+                g.autoExpanded = true;
+            } else if (!nearHand && g.autoExpanded) {
+                this._setHandExpanded(false);
+                g.autoExpanded = false;
+            }
         }
 
         // Cursor broadcast (throttled)
@@ -372,7 +389,9 @@ export default class HtmlBoardView {
             ref.el.style.zIndex = '';
             if (sy >= this._handTop()) {
                 this._engine.takeObject(g.id);
+                // Leave hand expanded — user can see the card they just picked up
             } else {
+                if (g.autoExpanded) this._setHandExpanded(false);
                 const wx = sx + this._scrollX - g.offX;
                 const wy = sy + this._scrollY - g.offY;
                 this._engine.moveObject(g.id, wx, wy);
@@ -382,12 +401,12 @@ export default class HtmlBoardView {
 
         if (g.type === 'handDrag') {
             g.ghost.remove();
-            // Restore source card opacity whether we place or cancel
             if (this._handCards[g.id]) this._handCards[g.id].style.opacity = '';
 
             if (!g.moved) return; // tap on hand card — no-op
 
             if (sy < this._handTop()) {
+                if (g.autoExpanded) this._setHandExpanded(false);
                 const wx = sx + this._scrollX;
                 const wy = sy + this._scrollY;
                 this._engine.placeObject(g.id, wx, wy);
