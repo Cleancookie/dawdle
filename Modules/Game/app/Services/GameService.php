@@ -10,6 +10,7 @@ use Modules\Game\Events\GamePlayerJoined;
 use Modules\Game\Models\GameResult;
 use Modules\Game\Models\GameSession;
 use Modules\Board\Events\BoardCursorMoved;
+use Modules\Board\Events\BoardObjectsChanged;
 use Modules\Board\Services\GameLogic as BoardGameLogic;
 use Modules\Pack\Events\PackAnswerSubmitted;
 use Modules\Pack\Events\PackRoundEnded;
@@ -548,6 +549,37 @@ class GameService
                 (float) ($moveData['camH'] ?? 0),
             ));
 
+            return $state;
+        }
+
+        if ($type === 'board.object_move') {
+            $id = $moveData['id'] ?? null;
+            if (!$id || !isset($state['objects'][$id])) return $state;
+            $state['objects'][$id]['x']        = (float) ($moveData['x'] ?? 0);
+            $state['objects'][$id]['y']        = (float) ($moveData['y'] ?? 0);
+            $state['objects'][$id]['holderId'] = null;
+            Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+            broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
+            return $state;
+        }
+
+        if ($type === 'board.object_take') {
+            $id = $moveData['id'] ?? null;
+            if (!$id || !isset($state['objects'][$id])) return $state;
+            $state['objects'][$id]['holderId'] = $guestId;
+            Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+            broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
+            return $state;
+        }
+
+        if ($type === 'board.object_place') {
+            $id = $moveData['id'] ?? null;
+            if (!$id || !isset($state['objects'][$id])) return $state;
+            $state['objects'][$id]['x']        = (float) ($moveData['x'] ?? 0);
+            $state['objects'][$id]['y']        = (float) ($moveData['y'] ?? 0);
+            $state['objects'][$id]['holderId'] = null;
+            Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
+            broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
             return $state;
         }
 

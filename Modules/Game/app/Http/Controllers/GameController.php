@@ -26,6 +26,7 @@ class GameController extends Controller
             'strokeId'    => 'sometimes|nullable|string|max:64',
             'final'       => 'sometimes|boolean',
             'symbolIdx'   => 'sometimes|integer|min:0|max:30',
+            'id'          => 'sometimes|string|max:64',
         ]);
         $guestId = $request->header('X-Guest-ID');
         $moveData = $request->all();
