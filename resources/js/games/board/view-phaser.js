@@ -15,10 +15,11 @@ const CARD_H         = 88;
 const HAND_PEEK      = 32;   // px visible above screen bottom in collapsed mode
 const HAND_PAD       = 8;    // px padding inside the hand tray
 const HAND_CARD_GAP  = 6;    // px gap between cards in expanded mode
-const HAND_OVERLAP_X = 20;   // px x-step per card in collapsed mode (heavy overlap)
-const HAND_ZONE_H    = 80;   // px from screen bottom — dropping here takes object to hand
-const HAND_TWEEN_MS  = 180;
+const HAND_OVERLAP_X = 20;   // px x-step per card in collapsed mode
 const HAND_BG_COLOR  = 0xf1f5f9;
+// How far the tray rises from collapsed to expanded
+const HAND_EXPAND_AMOUNT = CARD_H + HAND_PAD * 2 - HAND_PEEK; // 72px
+const HAND_TWEEN_MS  = 180;
 
 function hexToInt(hex) { return parseInt(hex.replace('#', ''), 16); }
 
@@ -27,10 +28,10 @@ function hexToInt(hex) { return parseInt(hex.replace('#', ''), 16); }
 /**
  * @param {import('./engine.js').default} engine
  * @param {string} myGuestId
- * @param {HTMLElement} domContainer
+ * @param {HTMLElement} _domContainer
  * @param {function(number, number, CameraState): void} onCursorMove
  */
-function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
+function makeBoardScene(engine, myGuestId, _domContainer, onCursorMove) {
     return class BoardScene extends Scene {
         constructor() { super('Board'); }
 
@@ -49,17 +50,16 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
 
             /** @type {Record<string, CursorObj>} */
             this._cursors = {};
-
             /** @type {Record<string, BoardObjRef>} */
             this._objects = {};
-
-            /** @type {Record<string, Phaser.GameObjects.Container>} hand card pool */
+            /** @type {Record<string, Phaser.GameObjects.Container>} */
             this._handCards = {};
 
-            this._handExpanded = false;
+            this._handExpanded    = false;
+            this._handExpandOffset = 0;   // tweened 0 → HAND_EXPAND_AMOUNT
+            this._anyDragging     = false;
             /** @type {HandDrag|null} */
             this._handDrag = null;
-            this._anyDragging = false;
 
             this._createHandArea();
             this._setupBoardDragEvents();
@@ -72,69 +72,56 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
             };
             engine.on('stateChanged', this._onState);
 
-            this.scale.on('resize', (sz) => {
-                this._grid.setSize(sz.width, sz.height);
-                this._repositionHand();
-            }, this);
+            this.scale.on('resize', (sz) => this._grid.setSize(sz.width, sz.height), this);
         }
 
         update() {
             const cam = this.cameras.main;
+
+            // Align dot grid to world origin as camera pans
             const ox = ((cam.scrollX % GRID_SIZE) + GRID_SIZE) % GRID_SIZE;
             const oy = ((cam.scrollY % GRID_SIZE) + GRID_SIZE) % GRID_SIZE;
             this._grid.setTilePosition(ox, oy);
+
+            // Keep hand tray anchored to screen bottom in world space.
+            // World-space positioning means Phaser's input hit-testing is always correct,
+            // avoiding the scrollFactor(0)-container input bug.
+            const sh = this.scale.height;
+            this._handContainer.setPosition(
+                cam.scrollX,
+                cam.scrollY + sh - HAND_PEEK - this._handExpandOffset,
+            );
+            this._handBg.setSize(this.scale.width, CARD_H + HAND_PAD * 2);
         }
 
         // ── Hand area ─────────────────────────────────────────────────────────
 
         _createHandArea() {
-            const sw = this.scale.width;
-            const sh = this.scale.height;
+            this._handContainer = this.add.container(0, 0).setDepth(100);
 
-            this._handContainer = this.add.container(0, sh - HAND_PEEK)
-                .setScrollFactor(0)
-                .setDepth(100);
-
-            // Background tray — tap to toggle expand/collapse
-            this._handBg = this.add.rectangle(0, 0, sw, CARD_H + HAND_PAD * 2, HAND_BG_COLOR, 0.96)
-                .setOrigin(0, 0)
-                .setInteractive();
-
-            let tapStartY = null;
-            this._handBg.on('pointerdown', (p) => { tapStartY = p.y; });
-            this._handBg.on('pointerup',   (p) => {
-                if (tapStartY !== null && Math.abs(p.y - tapStartY) < 8) this._toggleHand();
-                tapStartY = null;
-            });
+            // Background — not interactive; taps are handled manually in _setupInput
+            this._handBg = this.add.rectangle(0, 0, this.scale.width, CARD_H + HAND_PAD * 2, HAND_BG_COLOR, 0.96)
+                .setOrigin(0, 0);
 
             this._handContainer.add(this._handBg);
         }
 
-        _repositionHand() {
-            const sw = this.scale.width;
-            const sh = this.scale.height;
-            this._handBg.setSize(sw, CARD_H + HAND_PAD * 2);
-            this._handContainer.setY(this._handExpanded ? sh - CARD_H - HAND_PAD * 2 : sh - HAND_PEEK);
-        }
-
         _toggleHand() {
             this._handExpanded = !this._handExpanded;
-            const sh = this.scale.height;
-            const targetY = this._handExpanded ? sh - CARD_H - HAND_PAD * 2 : sh - HAND_PEEK;
+            this._layoutHandCards();
             this.tweens.add({
-                targets:  this._handContainer,
-                y:        targetY,
+                targets:  this,                // tween the scene property directly
+                _handExpandOffset: this._handExpanded ? HAND_EXPAND_AMOUNT : 0,
                 duration: HAND_TWEEN_MS,
                 ease:     'Quad.easeOut',
-                onComplete: () => this._layoutHandCards(),
             });
-            this._layoutHandCards();
         }
 
         _layoutHandCards() {
-            const cards = Object.values(this._handCards);
             const spacing = this._handExpanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
-            cards.forEach((card, i) => card.setPosition(HAND_PAD + i * spacing, HAND_PAD));
+            Object.values(this._handCards).forEach((card, i) => {
+                card.setPosition(HAND_PAD + i * spacing, HAND_PAD);
+            });
         }
 
         // ── Board objects (world space) ────────────────────────────────────────
@@ -190,7 +177,8 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
                 this._objects[id].dragging = false;
                 this._anyDragging = false;
 
-                if (ptr.y > this.scale.height - HAND_ZONE_H) {
+                const handTop = this.scale.height - HAND_PEEK - this._handExpandOffset;
+                if (ptr.y > handTop) {
                     engine.takeObject(id);
                 } else {
                     engine.moveObject(id, go.x, go.y);
@@ -231,20 +219,38 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
                 fontSize: '14px', fontFamily: 'ui-sans-serif, system-ui, sans-serif', color: '#ffffff',
             }).setOrigin(0.5, 0.5);
 
-            const card = this.add.container(HAND_PAD, HAND_PAD, [rect, label])
-                .setSize(CARD_W, CARD_H)
-                .setInteractive();
-
-            card.on('pointerdown', (ptr) => this._startHandDrag(obj.id, card, ptr));
-            return card;
+            // No setInteractive — hit detection is done manually in _setupInput
+            return this.add.container(HAND_PAD, HAND_PAD, [rect, label]).setSize(CARD_W, CARD_H);
         }
 
-        /** Detach card from tray and float it at pointer position for cross-space drag */
-        _startHandDrag(objId, card, ptr) {
+        /**
+         * Returns the id of the hand card at screen position (px, py), or null.
+         * Screen-space calculation avoids the scrollFactor input bug.
+         */
+        _handCardAtScreen(px, py) {
+            const sh      = this.scale.height;
+            const trayTop = sh - HAND_PEEK - this._handExpandOffset;
+            const cardTop = trayTop + HAND_PAD;
+
+            if (py < cardTop || py > cardTop + CARD_H) return null;
+
+            const spacing = this._handExpanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
+            const ids     = Object.keys(this._handCards);
+            for (let i = 0; i < ids.length; i++) {
+                const left = HAND_PAD + i * spacing;
+                if (px >= left && px <= left + CARD_W) return ids[i];
+            }
+            return null;
+        }
+
+        _startHandDrag(objId, ptr) {
+            const card = this._handCards[objId];
+            if (!card) return;
             delete this._handCards[objId];
             this._handContainer.remove(card, false);
             this.children.add(card);
-            card.setScrollFactor(0).setDepth(500).setPosition(ptr.x, ptr.y);
+            const cam = this.cameras.main;
+            card.setDepth(500).setPosition(cam.scrollX + ptr.x, cam.scrollY + ptr.y);
             this._handDrag = { id: objId, card };
         }
 
@@ -253,19 +259,18 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
             this._handDrag = null;
             card.destroy();
 
-            if (ptr.y < this.scale.height - HAND_ZONE_H) {
+            const handTop = this.scale.height - HAND_PEEK - this._handExpandOffset;
+            if (ptr.y < handTop) {
                 const cam = this.cameras.main;
                 engine.placeObject(id, cam.scrollX + ptr.x, cam.scrollY + ptr.y);
             } else {
-                // Dropped back in hand zone — restore from current engine state
                 this._syncHand(engine.state.objects);
             }
         }
 
         _cancelHandDrag() {
-            const { card } = this._handDrag;
+            this._handDrag.card.destroy();
             this._handDrag = null;
-            card.destroy();
             this._syncHand(engine.state.objects);
         }
 
@@ -290,11 +295,7 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
             }
         }
 
-        /**
-         * @param {CursorEntry} c
-         * @param {number} handCount
-         * @returns {CursorObj}
-         */
+        /** @param {CursorEntry} c @param {number} handCount @returns {CursorObj} */
         _spawnCursor(c, handCount) {
             const col = hexToInt(c.color);
             const gfx = this.add.graphics();
@@ -310,7 +311,6 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
                 fontSize: '11px', fontFamily: 'ui-sans-serif, system-ui, sans-serif',
                 color: '#ffffff', backgroundColor: c.color, padding: { x: 4, y: 2 },
             });
-
             const badge = this.add.text(14, 16, handCount > 0 ? String(handCount) : '', {
                 fontSize: '10px', fontFamily: 'ui-sans-serif, system-ui, sans-serif',
                 color: '#ffffff', backgroundColor: c.color, padding: { x: 3, y: 1 },
@@ -320,22 +320,33 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
             return { container, gfx, label, badge };
         }
 
-        // ── Input (pan + hand drag relay) ─────────────────────────────────────
+        // ── Input ─────────────────────────────────────────────────────────────
 
         _setupInput(onCursorMove) {
-            let drag     = null;
-            let lastSent = 0;
+            let drag         = null;
+            let handTapStart = null;
+            let lastSent     = 0;
 
             this.input.on('pointerdown', (p) => {
-                // Don't start pan if pointer is in the hand zone
-                if (p.y > this.scale.height - HAND_ZONE_H) return;
+                const sh      = this.scale.height;
+                const handTop = sh - HAND_PEEK - this._handExpandOffset;
+
+                if (p.y >= handTop) {
+                    // Pointer is in the hand tray area
+                    handTapStart = { x: p.x, y: p.y };
+                    const cardId = this._handCardAtScreen(p.x, p.y);
+                    if (cardId) this._startHandDrag(cardId, p);
+                    return; // never start a pan from the hand area
+                }
+
                 const cam = this.cameras.main;
                 drag = { startScrollX: cam.scrollX, startScrollY: cam.scrollY, startX: p.x, startY: p.y };
             });
 
             this.input.on('pointermove', (p) => {
                 if (this._handDrag) {
-                    this._handDrag.card.setPosition(p.x, p.y);
+                    const cam = this.cameras.main;
+                    this._handDrag.card.setPosition(cam.scrollX + p.x, cam.scrollY + p.y);
                     return;
                 }
 
@@ -354,13 +365,19 @@ function makeBoardScene(engine, myGuestId, domContainer, onCursorMove) {
             });
 
             this.input.on('pointerup', (p) => {
-                if (this._handDrag) this._endHandDrag(p);
+                if (this._handDrag) {
+                    this._endHandDrag(p);
+                } else if (handTapStart && Math.hypot(p.x - handTapStart.x, p.y - handTapStart.y) < 10) {
+                    this._toggleHand();
+                }
+                handTapStart = null;
                 drag = null;
             });
 
             this.input.on('pointercancel', () => {
                 if (this._handDrag) this._cancelHandDrag();
                 drag = null;
+                handTapStart = null;
             });
         }
 
