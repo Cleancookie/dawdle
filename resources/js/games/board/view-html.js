@@ -3,13 +3,6 @@
  */
 
 const GRID_SIZE = 32;
-
-// Adaptive send rate based on detected connection quality
-const { CURSOR_THROTTLE_MS, CURSOR_TWEEN_MS } = (() => {
-    const rates = { 'slow-2g': 800, '2g': 500, '3g': 200, '4g': 50 };
-    const ms = rates[navigator.connection?.effectiveType] ?? 50;
-    return { CURSOR_THROTTLE_MS: ms, CURSOR_TWEEN_MS: Math.round(ms * 1.6) };
-})();
 const CARD_W             = 64;
 const CARD_H             = 88;
 const HAND_PEEK          = 32;
@@ -36,8 +29,10 @@ export default class HtmlBoardView {
         this._handOrder        = [];   // ordered card IDs
         this._boardObjs        = {};   // id -> { el, dragging }
         this._cursors          = {};   // guestId -> HTMLElement
-        this._lastSent         = 0;    // cursor throttle
-        this._lastObjDragSent  = 0;    // object-drag throttle
+        this._throttleMs       = 50;   // adaptive — updated by setThrottleMs()
+        this._tweenMs          = 80;
+        this._lastSent         = 0;
+        this._lastObjDragSent  = 0;
         this._gesture          = null;
         this._pendingInsert    = null; // slot index for next arriving hand card
 
@@ -335,14 +330,14 @@ export default class HtmlBoardView {
             e.style.transition = 'none';
             e.style.transform  = `translate(${c.boardX - this._scrollX}px,${c.boardY - this._scrollY}px)`;
             e.getBoundingClientRect(); // force reflow
-            e.style.transition = `transform ${CURSOR_TWEEN_MS}ms linear`;
+            e.style.transition = `transform ${this._tweenMs}ms linear`;
         }
     }
 
     /** @param {CursorEntry} c @returns {HTMLElement} */
     _spawnCursor(c) {
         const wrap = document.createElement('div');
-        css(wrap, `position:absolute;top:0;left:0;will-change:transform;transition:transform ${CURSOR_TWEEN_MS}ms linear;`);
+        css(wrap, `position:absolute;top:0;left:0;will-change:transform;transition:transform ${this._tweenMs}ms linear;`);
         wrap.innerHTML = `
             <svg width="14" height="19" viewBox="0 0 14 19" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));display:block;">
                 <path d="M1 1L1 15L5 10.5L8 17.5L10 16.5L7 9.5L13 9.5Z" fill="${c.color}" stroke="white" stroke-width="1.2"/>
@@ -424,7 +419,7 @@ export default class HtmlBoardView {
         const now = Date.now();
 
         // Bug 1 fix: cursor broadcast is NOT gated by gesture — always fires on any pointer move
-        if (now - this._lastSent >= CURSOR_THROTTLE_MS) {
+        if (now - this._lastSent >= this._throttleMs) {
             this._lastSent = now;
             this._engine.sendCursor(
                 sx + this._scrollX, sy + this._scrollY,
@@ -451,7 +446,7 @@ export default class HtmlBoardView {
                 ref.el.style.top  = `${wy}px`;
             }
             // Bug 3 fix: broadcast live world position to other players
-            if (now - this._lastObjDragSent >= CURSOR_THROTTLE_MS) {
+            if (now - this._lastObjDragSent >= this._throttleMs) {
                 this._lastObjDragSent = now;
                 this._engine.sendObjectDrag(g.id, wx, wy);
             }
@@ -462,7 +457,7 @@ export default class HtmlBoardView {
             g.ghost.style.left = `${sx - CARD_W / 2}px`;
             g.ghost.style.top  = `${sy - CARD_H / 2}px`;
             // Bug 4: broadcast live position when card is above the hand zone
-            if (sy < this._handTop() && now - this._lastObjDragSent >= CURSOR_THROTTLE_MS) {
+            if (sy < this._handTop() && now - this._lastObjDragSent >= this._throttleMs) {
                 this._lastObjDragSent = now;
                 this._engine.sendObjectDrag(g.id, sx + this._scrollX, sy + this._scrollY);
             }
@@ -595,6 +590,17 @@ export default class HtmlBoardView {
         ghost.textContent = obj?.label ?? '';
         this._container.appendChild(ghost);
         return ghost;
+    }
+
+    // ── Network quality ───────────────────────────────────────────────────────
+
+    /** Called by RoomPage when RTT/queue-depth measurement changes. */
+    setThrottleMs(ms) {
+        this._throttleMs = ms;
+        this._tweenMs    = Math.round(ms * 1.6);
+        for (const el of Object.values(this._cursors)) {
+            el.style.transition = `transform ${this._tweenMs}ms linear`;
+        }
     }
 
     // ── Teardown ──────────────────────────────────────────────────────────────

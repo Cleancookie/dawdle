@@ -44,8 +44,9 @@ export default class BoardEngine extends SimpleEmitter {
     /** @param {GameConfig} config @param {function(BoardMove): void} onMove */
     constructor(config, onMove) {
         super();
-        this._config = config;
-        this._onMove = onMove;
+        this._config  = config;
+        this._onMove  = onMove;
+        this._myName  = config.players.find((p) => p.guestId === config.guestId)?.displayName ?? '';
 
         /** @type {Record<string, string>} guestId → hex color */
         const colorMap = {};
@@ -78,7 +79,8 @@ export default class BoardEngine extends SimpleEmitter {
             return;
         }
 
-        if (name === 'board.object_dragging') {
+        // Received via WebSocket whisper from the dragging client
+        if (name === 'board.object_drag') {
             this._setState({
                 grabbed:  { ...this.state.grabbed,  [payload.objectId]: payload.guestId },
                 dragging: { ...this.state.dragging, [payload.objectId]: { x: payload.x, y: payload.y } },
@@ -86,7 +88,8 @@ export default class BoardEngine extends SimpleEmitter {
             return;
         }
 
-        if (name === 'board.cursor_moved') {
+        // Received via WebSocket whisper from the moving client
+        if (name === 'board.cursor') {
             if (payload.guestId === this._config.guestId) return;
             this._setState({
                 cursors: {
@@ -121,11 +124,19 @@ export default class BoardEngine extends SimpleEmitter {
     grabObject(id) { this._onMove({ type: 'board.object_grab', id }); }
 
     /** @param {string} id @param {number} x @param {number} y — throttled live position during drag */
-    sendObjectDrag(id, x, y) { this._onMove({ type: 'board.object_drag', id, x, y }); }
+    sendObjectDrag(id, x, y) {
+        this.emit('whisper', {
+            event:   'board.object_drag',
+            payload: { guestId: this._config.guestId, objectId: id, x, y },
+        });
+    }
 
     /** @param {number} bx @param {number} by @param {CameraState} cam */
     sendCursor(bx, by, cam) {
-        this._onMove({ type: 'board.cursor', x: bx, y: by, camX: cam.x, camY: cam.y, camW: cam.w, camH: cam.h });
+        this.emit('whisper', {
+            event:   'board.cursor',
+            payload: { guestId: this._config.guestId, displayName: this._myName, x: bx, y: by, camX: cam.x, camY: cam.y, camW: cam.w, camH: cam.h },
+        });
     }
 
     /** @param {string} id @param {number} x @param {number} y */

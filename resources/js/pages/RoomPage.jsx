@@ -100,7 +100,7 @@ function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySe
     );
 }
 
-function GameArea({ gameType, gameConfig, onMove, onComplete, onMounted, gameRef }) {
+function GameArea({ gameType, gameConfig, onMove, onComplete, onMounted, gameRef, channel }) {
     const containerRef = useRef(null);
 
     useLayoutEffect(() => {
@@ -110,10 +110,17 @@ function GameArea({ gameType, gameConfig, onMove, onComplete, onMounted, gameRef
         const game = new GameClass(containerRef.current, gameConfig);
         game.on('move', onMove);
         game.on('complete', onComplete);
+
+        // Wire ephemeral events directly over WebSocket (bypass HTTP entirely)
+        game.on('whisper', ({ event, payload }) => channel?.whisper(event, payload));
+        const whisperEvents = GameClass.whisperEvents ?? [];
+        whisperEvents.forEach((ev) => channel?.listenForWhisper(ev, (data) => game.receiveEvent(ev, data)));
+
         gameRef.current = game;
         onMounted?.();
 
         return () => {
+            whisperEvents.forEach((ev) => channel?.stopListeningForWhisper?.(ev));
             game.destroy();
             gameRef.current = null;
         };
@@ -172,8 +179,10 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     const [scores, setScores] = useState(null);
     const messagesEndRef  = useRef(null);
     const chatInputRef    = useRef(null);
-    const moveBuffer      = useRef(new Map()); // key → moveData, for ephemeral latest-wins batching
     const gameSessionRef  = useRef(null);
+    const rttEmaRef       = useRef(100);   // ms, exponential moving average of observed RTT
+    const inflightRef     = useRef(0);     // current in-flight HTTP POST count
+    const throttleMsRef   = useRef(50);    // last throttle value pushed to the game
     const gameRef = useRef(null);
     const pendingGameEvents = useRef([]);
     const [chatCollapsed, setChatCollapsed] = useState(false);
@@ -184,25 +193,36 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         setMessages((prev) => [...prev, { system: true, text, timestamp: new Date().toISOString() }]);
     }
 
-    // Keep ref in sync so flush interval can read latest gameId without stale closure
+    // Keep ref in sync so postMove can read latest gameId without a stale closure
     useEffect(() => { gameSessionRef.current = gameSession; }, [gameSession]);
 
-    // Flush buffered ephemeral moves at a network-adaptive rate
+    // Ping system: measure RTT + inflight queue depth → push adaptive throttle to the game
     useEffect(() => {
-        if (!gameSession) return;
-        const rates = { 'slow-2g': 800, '2g': 500, '3g': 200, '4g': 0 };
-        const batchMs = rates[navigator.connection?.effectiveType] ?? 0;
-        if (batchMs === 0) return; // fast connection — no batching needed
-
-        const timer = setInterval(() => {
-            const buf = moveBuffer.current;
-            if (buf.size === 0) return;
-            const moves = [...buf.values()];
-            buf.clear();
-            moves.forEach((m) => postMove(m));
-        }, batchMs);
-        return () => clearInterval(timer);
-    }, [gameSession?.gameId]); // eslint-disable-line react-hooks/exhaustive-deps
+        function deriveThrottleMs(rttMs, inflight) {
+            const backoff = Math.max(1, inflight);
+            const raw = rttMs * 1.2 * backoff;
+            return Math.min(Math.max(Math.round(raw / 10) * 10, 16), 800);
+        }
+        function applyThrottle() {
+            const ms = deriveThrottleMs(rttEmaRef.current, inflightRef.current);
+            if (ms !== throttleMsRef.current) {
+                throttleMsRef.current = ms;
+                gameRef.current?.setNetworkQuality?.(ms);
+            }
+        }
+        async function ping() {
+            const t0 = performance.now();
+            try {
+                await fetch('/api/v1/ping');
+                const rtt = performance.now() - t0;
+                rttEmaRef.current = 0.7 * rttEmaRef.current + 0.3 * rtt;
+            } catch { /* ignore — stale estimate is fine */ }
+            applyThrottle();
+        }
+        ping();
+        const id = setInterval(ping, 5000);
+        return () => clearInterval(id);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const { members, channel } = useRoom(room?.roomId, guest.guestId);
     const isHost = room?.hostGuestId === guest.guestId;
@@ -334,7 +354,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
             'spotto.round_started', 'spotto.point_scored', 'spotto.hover',
             'pack.round_started', 'pack.answer_submitted', 'pack.round_ended',
-            'board.cursor_moved', 'board.objects_changed', 'board.object_grabbed', 'board.object_dragging',
+            'board.objects_changed', 'board.object_grabbed',
         ];
         gameEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
@@ -381,31 +401,26 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         }
     }
 
-    // Ephemeral move types: only the latest position matters, safe to drop stale ones
-    const EPHEMERAL_MOVES = new Set(['board.cursor', 'board.object_drag']);
-
-    async function postMove(moveData) {
+    async function handleMove(moveData) {
         const session = gameSessionRef.current;
         if (!session) return;
-        await fetch(`/api/v1/games/${session.gameId}/move`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'X-Guest-ID': guest.guestId,
-                ...(window.Echo?.socketId() ? { 'X-Socket-ID': window.Echo.socketId() } : {}),
-            },
-            body: JSON.stringify(moveData),
-        });
-    }
-
-    function handleMove(moveData) {
-        if (EPHEMERAL_MOVES.has(moveData.type) && navigator.connection?.effectiveType !== '4g') {
-            // Latest-wins: drop previous position for same event key if not yet flushed
-            const key = `${moveData.type}:${moveData.id ?? ''}`;
-            moveBuffer.current.set(key, moveData);
-        } else {
-            postMove(moveData);
+        inflightRef.current++;
+        const t0 = performance.now();
+        try {
+            await fetch(`/api/v1/games/${session.gameId}/move`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Guest-ID': guest.guestId,
+                    ...(window.Echo?.socketId() ? { 'X-Socket-ID': window.Echo.socketId() } : {}),
+                },
+                body: JSON.stringify(moveData),
+            });
+            const rtt = performance.now() - t0;
+            rttEmaRef.current = 0.7 * rttEmaRef.current + 0.3 * rtt;
+        } finally {
+            inflightRef.current--;
         }
     }
 
@@ -577,6 +592,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                                 onComplete={handleComplete}
                                 onMounted={handleGameMounted}
                                 gameRef={gameRef}
+                                channel={channel}
                             />
                             {gameConfig.role === 'spectator' && (
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3
