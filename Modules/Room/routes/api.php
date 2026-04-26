@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Modules\Room\Http\Controllers\GuestController;
 use Modules\Room\Http\Controllers\RoomController;
 
-Route::prefix('v1')->get('ping', fn() => response('', 204));
+Route::get('v1/ping', function () { return response('', 204); });
 
 Route::middleware(['guest.id'])->prefix('v1')->group(function () {
     Route::patch('guests/display-name', [GuestController::class, 'updateDisplayName']);

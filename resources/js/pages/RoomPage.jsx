@@ -11,7 +11,7 @@ const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, s
 const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto', pack: 'Pack', board: 'BaseBoard' };
 
 // One colour per room member, assigned by join order
-function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
+function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame, gameInProgress, onWatchGame }) {
     const [linkCopied, setLinkCopied] = useState(false);
 
     function copyLink() {
@@ -48,16 +48,25 @@ function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySe
                 )}
             </div>
 
-            <button
-                onClick={onReadyToggle}
-                className={`self-start px-5 py-2 rounded font-medium text-sm transition-colors ${
-                    myReady
-                        ? 'bg-green-600 hover:bg-green-700 text-white'
-                        : 'bg-gray-800 hover:bg-gray-700 text-white'
-                }`}
-            >
-                {myReady ? 'Not Ready' : 'Ready'}
-            </button>
+            {gameInProgress ? (
+                <button
+                    onClick={onWatchGame}
+                    className="self-start px-5 py-2 rounded font-medium text-sm bg-gray-800 hover:bg-gray-700 text-white transition-colors"
+                >
+                    Watch game
+                </button>
+            ) : (
+                <button
+                    onClick={onReadyToggle}
+                    className={`self-start px-5 py-2 rounded font-medium text-sm transition-colors ${
+                        myReady
+                            ? 'bg-green-600 hover:bg-green-700 text-white'
+                            : 'bg-gray-800 hover:bg-gray-700 text-white'
+                    }`}
+                >
+                    {myReady ? 'Not Ready' : 'Ready'}
+                </button>
+            )}
 
             <div>
                 <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -252,10 +261,10 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                         setRoom(data);
                         setSelectedGame(data.selectedGame ?? 'tic_tac_toe');
 
-                        // Reconnect mid-game: restore playing phase from server state.
+                        // If a game is in progress, store the session so the lobby can
+                        // offer a "Watch game" button, but keep the user in the lobby.
                         if (data.status === 'playing' && data.activeGame) {
                             setGameSession(data.activeGame);
-                            setPhase('playing');
                         }
                     } else {
                         navigate('/');
@@ -581,6 +590,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             readySet={readySet}
                             selectedGame={selectedGame}
                             onSelectGame={handleSelectGame}
+                            gameInProgress={!!gameSession}
+                            onWatchGame={() => setPhase('playing')}
                         />
                     )}
                     {phase === 'playing' && gameConfig && (
@@ -595,7 +606,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                                 channel={channel}
                             />
                             {gameConfig.role === 'spectator' && (
-                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3
+                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3
                                     bg-gray-900/90 backdrop-blur-sm text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
                                     <span>You're spectating</span>
                                     {gameSession.players.length < gameConfig.maxPlayers && (
