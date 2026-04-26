@@ -3,7 +3,8 @@
  */
 
 const GRID_SIZE          = 32;
-const CURSOR_THROTTLE_MS = 16;
+const CURSOR_THROTTLE_MS  = 50;
+const CURSOR_TWEEN_MS     = 80;
 const CARD_W             = 64;
 const CARD_H             = 88;
 const HAND_PEEK          = 32;
@@ -325,14 +326,18 @@ export default class HtmlBoardView {
         for (const [id, e] of Object.entries(this._cursors)) {
             const c = this._engine.state.cursors[id];
             if (!c) continue;
-            e.style.transform = `translate(${c.boardX - this._scrollX}px,${c.boardY - this._scrollY}px)`;
+            // Suppress tween during scroll — the viewport moved, not the cursor
+            e.style.transition = 'none';
+            e.style.transform  = `translate(${c.boardX - this._scrollX}px,${c.boardY - this._scrollY}px)`;
+            e.getBoundingClientRect(); // force reflow
+            e.style.transition = `transform ${CURSOR_TWEEN_MS}ms linear`;
         }
     }
 
     /** @param {CursorEntry} c @returns {HTMLElement} */
     _spawnCursor(c) {
         const wrap = document.createElement('div');
-        css(wrap, 'position:absolute;top:0;left:0;will-change:transform;');
+        css(wrap, `position:absolute;top:0;left:0;will-change:transform;transition:transform ${CURSOR_TWEEN_MS}ms linear;`);
         wrap.innerHTML = `
             <svg width="14" height="19" viewBox="0 0 14 19" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));display:block;">
                 <path d="M1 1L1 15L5 10.5L8 17.5L10 16.5L7 9.5L13 9.5Z" fill="${c.color}" stroke="white" stroke-width="1.2"/>
