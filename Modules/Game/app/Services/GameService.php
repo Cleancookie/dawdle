@@ -74,12 +74,6 @@ class GameService
 
                 return [$state, array_map(fn ($id) => ['guestId' => $id], $playerGuestIds), null];
             })(),
-            GameType::Table => (static function () use ($gameId, $roomId, $playerGuestIds) {
-                $state = BoardGameLogic::initialState($gameId, $roomId, $playerGuestIds);
-                $state['gameType'] = 'table';
-
-                return [$state, array_map(fn ($id) => ['guestId' => $id], $playerGuestIds), null];
-            })(),
         };
 
         Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
@@ -113,7 +107,6 @@ class GameService
             GameType::Spotto     => $this->applySpottoMove($gameId, $guestId, $moveData, $state),
             GameType::Pack       => $this->applyPackMove($gameId, $guestId, $moveData, $state),
             GameType::Board      => $this->applyBoardMove($gameId, $guestId, $moveData, $state),
-            GameType::Table      => $this->applyBoardMove($gameId, $guestId, $moveData, $state),
         };
     }
 
@@ -170,7 +163,6 @@ class GameService
             GameType::Spotto     => SpottoGameLogic::MIN_PLAYERS,
             GameType::Pack       => PackGameLogic::MIN_PLAYERS,
             GameType::Board      => BoardGameLogic::MIN_PLAYERS,
-            GameType::Table      => BoardGameLogic::MIN_PLAYERS,
         };
     }
 
@@ -182,7 +174,6 @@ class GameService
             GameType::Spotto     => SpottoGameLogic::MAX_PLAYERS,
             GameType::Pack       => PackGameLogic::MAX_PLAYERS,
             GameType::Board      => BoardGameLogic::MAX_PLAYERS,
-            GameType::Table      => BoardGameLogic::MAX_PLAYERS,
         };
     }
 

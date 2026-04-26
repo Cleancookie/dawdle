@@ -1,16 +1,16 @@
 import { SimpleEmitter } from './engine.js';
 import BoardEngine        from './engine.js';
-import PhaserBoardView    from './view-phaser.js';
+import HtmlBoardView      from './view-html.js';
 
 export default class BoardGame extends SimpleEmitter {
-    static roomConfig = { collapseChat: true };
+    static roomConfig = {};
     static maxPlayers = 40;
 
     /** @param {HTMLElement} container @param {import('./engine.js').GameConfig} config */
     constructor(container, config) {
         super();
         this._engine = new BoardEngine(config, (data) => this.emit('move', data));
-        this._view   = new PhaserBoardView(container, this._engine, config);
+        this._view   = new HtmlBoardView(container, this._engine, config);
     }
 
     receiveEvent(name, payload) {

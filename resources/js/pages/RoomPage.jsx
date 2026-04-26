@@ -5,11 +5,10 @@ import PictionaryGame from '../games/pictionary/index.jsx';
 import SpottoGame from '../games/spotto/index.jsx';
 import PackGame from '../games/pack/index.jsx';
 import BoardGame from '../games/board/index.jsx';
-import TableGame from '../games/table/index.jsx';
 
-const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, spotto: SpottoGame, pack: PackGame, board: BoardGame, table: TableGame };
+const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, spotto: SpottoGame, pack: PackGame, board: BoardGame };
 
-const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto', pack: 'Pack', board: 'Board', table: 'Table' };
+const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto', pack: 'Pack', board: 'BaseBoard' };
 
 // One colour per room member, assigned by join order
 function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame }) {
