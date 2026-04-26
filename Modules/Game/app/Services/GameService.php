@@ -10,6 +10,7 @@ use Modules\Game\Events\GamePlayerJoined;
 use Modules\Game\Models\GameResult;
 use Modules\Game\Models\GameSession;
 use Modules\Board\Events\BoardCursorMoved;
+use Modules\Board\Events\BoardObjectDragging;
 use Modules\Board\Events\BoardObjectGrabbed;
 use Modules\Board\Events\BoardObjectsChanged;
 use Modules\Board\Services\GameLogic as BoardGameLogic;
@@ -540,6 +541,17 @@ class GameService
             $id = $moveData['id'] ?? null;
             if (!$id || !isset($state['objects'][$id])) return $state;
             broadcast(new BoardObjectGrabbed($roomId, $guestId, $id))->toOthers();
+            return $state;
+        }
+
+        if ($type === 'board.object_drag') {
+            $id = $moveData['id'] ?? null;
+            if (!$id || !isset($state['objects'][$id])) return $state;
+            broadcast(new BoardObjectDragging(
+                $roomId, $guestId, $id,
+                (float) ($moveData['x'] ?? 0),
+                (float) ($moveData['y'] ?? 0),
+            ))->toOthers();
             return $state;
         }
 

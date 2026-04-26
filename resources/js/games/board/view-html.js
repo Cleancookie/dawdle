@@ -12,7 +12,7 @@ const HAND_CARD_GAP      = 6;
 const HAND_OVERLAP_X     = 20;
 const HAND_EXPAND_H      = CARD_H + HAND_PAD * 2;  // 104
 const HAND_TWEEN_MS      = 180;
-const HAND_HOVER_ZONE    = 60;  // px above collapsed hand top that triggers auto-expand
+const HAND_HOVER_ZONE    = 60;
 
 function css(el, s) { el.style.cssText = s; }
 
@@ -21,18 +21,19 @@ function css(el, s) { el.style.cssText = s; }
 export default class HtmlBoardView {
     /** @param {HTMLElement} container @param {import('./engine.js').default} engine @param {import('./engine.js').GameConfig} config */
     constructor(container, engine, config) {
-        this._engine        = engine;
-        this._myId          = config.guestId;
-        this._scrollX       = 0;
-        this._scrollY       = 0;
-        this._expanded      = false;
-        this._handCards     = {};   // id -> HTMLElement
-        this._handOrder     = [];   // ordered array of card IDs for layout/sort
-        this._boardObjs     = {};   // id -> { el, dragging }
-        this._cursors       = {};   // guestId -> HTMLElement
-        this._lastSent      = 0;
-        this._gesture       = null;
-        this._pendingInsert = null; // index to insert next arriving hand card at
+        this._engine           = engine;
+        this._myId             = config.guestId;
+        this._scrollX          = 0;
+        this._scrollY          = 0;
+        this._expanded         = false;
+        this._handCards        = {};   // id -> HTMLElement
+        this._handOrder        = [];   // ordered card IDs
+        this._boardObjs        = {};   // id -> { el, dragging }
+        this._cursors          = {};   // guestId -> HTMLElement
+        this._lastSent         = 0;    // cursor throttle
+        this._lastObjDragSent  = 0;    // object-drag throttle
+        this._gesture          = null;
+        this._pendingInsert    = null; // slot index for next arriving hand card
 
         this._build(container);
         this._setupInput(container);
@@ -93,34 +94,44 @@ export default class HtmlBoardView {
     // ── Render ────────────────────────────────────────────────────────────────
 
     _render(state) {
-        this._syncObjects(state.objects, state.grabbed ?? {});
+        const grabbed  = state.grabbed  ?? {};
+        const dragging = state.dragging ?? {};
+        this._syncObjects(state.objects, grabbed, dragging);
         this._syncHand(state.objects);
-        this._syncCursors(state.cursors, state.objects);
+        this._syncCursors(state.cursors, state.objects, dragging);
     }
 
     // ── Board objects (world space) ───────────────────────────────────────────
 
     /**
      * @param {Record<string, BoardObject>} objects
-     * @param {Record<string, string>} grabbed  objId → grabber guestId
+     * @param {Record<string, string>} grabbed      objId → grabber guestId
+     * @param {Record<string, {x:number,y:number}>} dragging  objId → live world pos
      */
-    _syncObjects(objects, grabbed) {
+    _syncObjects(objects, grabbed, dragging) {
+        // Remove objects that left the board and are not being live-dragged
         for (const [id, ref] of Object.entries(this._boardObjs)) {
-            if (!objects[id] || objects[id].holderId !== null) {
+            if (!objects[id] || (objects[id].holderId !== null && !dragging[id])) {
                 ref.el.remove();
                 delete this._boardObjs[id];
             }
         }
         for (const [id, obj] of Object.entries(objects)) {
-            if (obj.holderId !== null) continue;
+            const dragPos = dragging[id];
+            // Skip if in someone's hand and no live drag position
+            if (obj.holderId !== null && !dragPos) continue;
+
+            const dx = dragPos ? dragPos.x : obj.x;
+            const dy = dragPos ? dragPos.y : obj.y;
+
             if (!this._boardObjs[id]) {
-                this._boardObjs[id] = this._spawnBoardObj(obj);
+                this._boardObjs[id] = this._spawnBoardObj({ ...obj, x: dx, y: dy });
             } else if (!this._boardObjs[id].dragging) {
-                this._boardObjs[id].el.style.left = `${obj.x}px`;
-                this._boardObjs[id].el.style.top  = `${obj.y}px`;
+                this._boardObjs[id].el.style.left = `${dx}px`;
+                this._boardObjs[id].el.style.top  = `${dy}px`;
             }
-            // Grabbed-by-another visual
-            const isGrabbed = !!grabbed[id];
+
+            const isGrabbed = !!grabbed[id] || !!dragPos;
             this._boardObjs[id].el.style.opacity = isGrabbed ? '0.4' : '1';
             this._boardObjs[id].el.style.cursor  = isGrabbed ? 'not-allowed' : 'grab';
         }
@@ -155,7 +166,6 @@ export default class HtmlBoardView {
         const mine    = Object.values(objects).filter((o) => o.holderId === this._myId);
         const mineIds = new Set(mine.map((o) => o.id));
 
-        // Remove stale
         for (const [id, e] of Object.entries(this._handCards)) {
             if (!mineIds.has(id)) {
                 e.remove();
@@ -163,13 +173,11 @@ export default class HtmlBoardView {
                 this._handOrder = this._handOrder.filter((x) => x !== id);
             }
         }
-        // Add new
         for (const obj of mine) {
             if (!this._handCards[obj.id]) {
                 const e = this._spawnHandCard(obj);
                 this._handCardsEl.appendChild(e);
                 this._handCards[obj.id] = e;
-                // Insert at pending slot or append
                 if (this._pendingInsert !== null) {
                     this._handOrder.splice(this._pendingInsert, 0, obj.id);
                     this._pendingInsert = null;
@@ -202,16 +210,14 @@ export default class HtmlBoardView {
     }
 
     /**
-     * Layout hand cards.
      * @param {{ excludeId?: string, insertGapAt?: number }} [opts]
-     *   excludeId  — card currently being dragged as a ghost (skip in layout)
-     *   insertGapAt — insert an empty slot at this index to preview where card will land
+     *   excludeId   — card being dragged as a ghost (skipped in layout, gap reserved for it)
+     *   insertGapAt — empty slot index showing where the dragged card will land
      */
     _layoutHand({ excludeId = null, insertGapAt = null } = {}) {
         const ids = excludeId
             ? this._handOrder.filter((id) => id !== excludeId)
             : [...this._handOrder];
-
         const cw = this._container.clientWidth;
 
         if (!this._expanded) {
@@ -225,7 +231,7 @@ export default class HtmlBoardView {
             return;
         }
 
-        // Expanded — optional gap slot for drag-insert preview
+        // Expanded — with optional gap slot for live insert preview
         const nSlots = insertGapAt !== null ? ids.length + 1 : ids.length;
         const totalW = nSlots > 0 ? nSlots * CARD_W + Math.max(0, nSlots - 1) * HAND_CARD_GAP : 0;
         const startX = Math.max(HAND_PAD, (cw - totalW) / 2);
@@ -240,10 +246,7 @@ export default class HtmlBoardView {
         });
     }
 
-    /**
-     * Returns the insert index (0…n) for a card being dragged at screen x=sx.
-     * excludeId: the card being dragged (excluded from slot calculations).
-     */
+    /** Returns the insert index (0…n) for a card dropped at screen x=sx. */
     _handInsertIndex(sx, excludeId = null) {
         const ids = excludeId
             ? this._handOrder.filter((id) => id !== excludeId)
@@ -279,13 +282,11 @@ export default class HtmlBoardView {
     _handCardAt(sx, sy) {
         const localY = sy - this._handTop();
         if (localY < HAND_PAD || localY > HAND_PAD + CARD_H) return null;
-        const spacing = this._expanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
         const n = this._handOrder.length;
-        const totalW = n > 0
-            ? (this._expanded ? n * CARD_W + (n - 1) * HAND_CARD_GAP : CARD_W + (n - 1) * HAND_OVERLAP_X)
-            : 0;
-        const startX = Math.max(HAND_PAD, (this._container.clientWidth - totalW) / 2);
-        // Check in reverse so top card (rightmost in z-order) wins
+        if (n === 0) return null;
+        const spacing = this._expanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
+        const totalW  = this._expanded ? n * CARD_W + (n - 1) * HAND_CARD_GAP : CARD_W + (n - 1) * HAND_OVERLAP_X;
+        const startX  = Math.max(HAND_PAD, (this._container.clientWidth - totalW) / 2);
         for (let i = this._handOrder.length - 1; i >= 0; i--) {
             const left = startX + i * spacing;
             if (sx >= left && sx <= left + CARD_W) return this._handOrder[i];
@@ -298,13 +299,17 @@ export default class HtmlBoardView {
     /**
      * @param {Record<string, CursorEntry>} cursors
      * @param {Record<string, BoardObject>} objects
+     * @param {Record<string, {x:number,y:number}>} dragging
      */
-    _syncCursors(cursors, objects) {
+    _syncCursors(cursors, objects, dragging) {
         for (const [id, e] of Object.entries(this._cursors)) {
             if (!cursors[id]) { e.remove(); delete this._cursors[id]; }
         }
         for (const [id, c] of Object.entries(cursors)) {
-            const count = Object.values(objects).filter((o) => o.holderId === id).length;
+            // Don't count cards the player is actively dragging toward the board
+            const count = Object.values(objects).filter(
+                (o) => o.holderId === id && !dragging[o.id],
+            ).length;
             if (!this._cursors[id]) {
                 this._cursors[id] = this._spawnCursor(c);
                 this._cursorLayer.appendChild(this._cursors[id]);
@@ -405,10 +410,21 @@ export default class HtmlBoardView {
     }
 
     _onMove(e) {
+        const { sx, sy } = this._screenXY(e);
+        const now = Date.now();
+
+        // Bug 1 fix: cursor broadcast is NOT gated by gesture — always fires on any pointer move
+        if (now - this._lastSent >= CURSOR_THROTTLE_MS) {
+            this._lastSent = now;
+            this._engine.sendCursor(
+                sx + this._scrollX, sy + this._scrollY,
+                { x: this._scrollX, y: this._scrollY, w: this._container.clientWidth, h: this._container.clientHeight },
+            );
+        }
+
         const g = this._gesture;
         if (!g || g.pointerId !== e.pointerId) return;
         e.preventDefault();
-        const { sx, sy } = this._screenXY(e);
 
         if (g.type === 'pan') {
             this._scrollX = g.startScrollX - (sx - g.startX);
@@ -417,10 +433,17 @@ export default class HtmlBoardView {
         }
 
         if (g.type === 'boardDrag') {
+            const wx = sx + this._scrollX - g.offX;
+            const wy = sy + this._scrollY - g.offY;
             const ref = this._boardObjs[g.id];
             if (ref) {
-                ref.el.style.left = `${sx + this._scrollX - g.offX}px`;
-                ref.el.style.top  = `${sy + this._scrollY - g.offY}px`;
+                ref.el.style.left = `${wx}px`;
+                ref.el.style.top  = `${wy}px`;
+            }
+            // Bug 3 fix: broadcast live world position to other players
+            if (now - this._lastObjDragSent >= CURSOR_THROTTLE_MS) {
+                this._lastObjDragSent = now;
+                this._engine.sendObjectDrag(g.id, wx, wy);
             }
         }
 
@@ -428,9 +451,14 @@ export default class HtmlBoardView {
             g.moved = g.moved || Math.hypot(sx - g.sx, sy - g.sy) > 6;
             g.ghost.style.left = `${sx - CARD_W / 2}px`;
             g.ghost.style.top  = `${sy - CARD_H / 2}px`;
+            // Bug 4: broadcast live position when card is above the hand zone
+            if (sy < this._handTop() && now - this._lastObjDragSent >= CURSOR_THROTTLE_MS) {
+                this._lastObjDragSent = now;
+                this._engine.sendObjectDrag(g.id, sx + this._scrollX, sy + this._scrollY);
+            }
         }
 
-        // Auto-expand hand when a dragged card approaches the bottom
+        // Auto-expand hand when dragging card close to the bottom
         if (g.type === 'boardDrag' || g.type === 'handDrag') {
             const nearHand = sy >= this._collapsedHandTop() - HAND_HOVER_ZONE;
             if (nearHand && !this._expanded) {
@@ -442,10 +470,9 @@ export default class HtmlBoardView {
             }
         }
 
-        // Sort preview: shift hand cards to show insert gap
+        // Sort gap preview while hovering over the hand tray
         if (g.type === 'boardDrag' && this._expanded) {
-            const inHandZone = sy >= this._handTop();
-            if (inHandZone) {
+            if (sy >= this._handTop()) {
                 const idx = this._handInsertIndex(sx);
                 if (idx !== g.insertIndex) {
                     g.insertIndex = idx;
@@ -458,28 +485,15 @@ export default class HtmlBoardView {
         }
 
         if (g.type === 'handDrag' && this._expanded) {
-            const inHandZone = sy >= this._handTop();
-            if (inHandZone) {
+            if (sy >= this._handTop()) {
                 const idx = this._handInsertIndex(sx, g.id);
                 if (idx !== g.insertIndex) {
                     g.insertIndex = idx;
                     this._layoutHand({ excludeId: g.id, insertGapAt: idx });
                 }
             } else {
-                // Dragging above hand — show hand without the card
                 this._layoutHand({ excludeId: g.id });
             }
-        }
-
-        // Cursor broadcast (throttled)
-        const now = Date.now();
-        if (now - this._lastSent >= CURSOR_THROTTLE_MS) {
-            this._lastSent = now;
-            const wx = sx + this._scrollX;
-            const wy = sy + this._scrollY;
-            const w  = this._container.clientWidth;
-            const h  = this._container.clientHeight;
-            this._engine.sendCursor(wx, wy, { x: this._scrollX, y: this._scrollY, w, h });
         }
     }
 
@@ -505,10 +519,7 @@ export default class HtmlBoardView {
             ref.el.style.zIndex = '';
 
             if (sy >= this._handTop()) {
-                // Dropped into hand — record insert slot
-                this._pendingInsert = this._expanded
-                    ? this._handInsertIndex(sx)
-                    : this._handOrder.length;
+                this._pendingInsert = this._expanded ? this._handInsertIndex(sx) : this._handOrder.length;
                 this._engine.takeObject(g.id);
             } else {
                 this._layoutHand(); // clear any gap preview
@@ -516,7 +527,6 @@ export default class HtmlBoardView {
                 const wy = sy + this._scrollY - g.offY;
                 this._engine.moveObject(g.id, wx, wy);
             }
-            // Restore hand to pre-drag state if we auto-expanded it
             if (g.autoExpanded) this._setHandExpanded(false);
             return;
         }
@@ -526,7 +536,6 @@ export default class HtmlBoardView {
             if (this._handCards[g.id]) this._handCards[g.id].style.opacity = '';
 
             if (!g.moved) {
-                // Tap — cancel, reset layout
                 this._layoutHand();
                 if (g.autoExpanded) this._setHandExpanded(false);
                 return;
@@ -541,9 +550,19 @@ export default class HtmlBoardView {
             } else {
                 // Dropped back in hand — commit sort order
                 const finalIdx = this._expanded ? this._handInsertIndex(sx, g.id) : g.insertIndex;
-                const without  = this._handOrder.filter((id) => id !== g.id);
+                const without   = this._handOrder.filter((id) => id !== g.id);
                 without.splice(finalIdx, 0, g.id);
                 this._handOrder = without;
+
+                // Bug 2 fix: snap source card to drop position, then animate to sorted slot.
+                // Without this, the card was visible at its old position before _layoutHand moved it.
+                const srcEl = this._handCards[g.id];
+                if (srcEl) {
+                    srcEl.style.transition = 'none';
+                    srcEl.style.left = `${sx - CARD_W / 2}px`;
+                    srcEl.getBoundingClientRect(); // force reflow so the snap renders first
+                    srcEl.style.transition = `left ${HAND_TWEEN_MS}ms cubic-bezier(.25,0,0,1)`;
+                }
                 this._layoutHand();
                 if (g.autoExpanded) this._setHandExpanded(false);
             }

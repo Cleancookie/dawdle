@@ -312,7 +312,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
             'spotto.round_started', 'spotto.point_scored', 'spotto.hover',
             'pack.round_started', 'pack.answer_submitted', 'pack.round_ended',
-            'board.cursor_moved', 'board.objects_changed', 'board.object_grabbed',
+            'board.cursor_moved', 'board.objects_changed', 'board.object_grabbed', 'board.object_dragging',
         ];
         gameEvents.forEach((e) => channel.listen('.' + e, fwd(e)));
         return () => gameEvents.forEach((e) => channel.stopListening('.' + e));
