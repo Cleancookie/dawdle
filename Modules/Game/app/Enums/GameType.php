@@ -9,6 +9,7 @@ enum GameType: string
     case Spotto     = 'spotto';
     case Pack       = 'pack';
     case Board      = 'board';
+    case Table      = 'table';
 
     public function label(): string
     {
@@ -18,6 +19,7 @@ enum GameType: string
             self::Spotto     => 'Spotto',
             self::Pack       => 'Pack',
             self::Board      => 'Board',
+            self::Table      => 'Table',
         };
     }
 
