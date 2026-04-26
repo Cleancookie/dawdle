@@ -17,7 +17,7 @@ function hexToInt(hex) {
 /**
  * @param {import('./engine.js').default} engine
  * @param {HTMLElement} domContainer
- * @param {function(number, number): void} onCursorMove  world-space (x, y)
+ * @param {function(number, number, import('./engine.js').CameraState): void} onCursorMove
  */
 function makeBoardScene(engine, domContainer, onCursorMove) {
     return class BoardScene extends Scene {
@@ -141,7 +141,12 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
                 if (now - lastSent >= CURSOR_THROTTLE_MS) {
                     lastSent = now;
                     const wp = cam.getWorldPoint(p.x, p.y);
-                    onCursorMove(wp.x, wp.y);
+                    onCursorMove(wp.x, wp.y, {
+                        x: cam.scrollX,
+                        y: cam.scrollY,
+                        w: cam.width / cam.zoom,
+                        h: cam.height / cam.zoom,
+                    });
                 }
             });
 
@@ -226,7 +231,7 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
 export default class PhaserBoardView {
     constructor(container, engine, config) {
         container.style.position = 'relative'; // scale label needs this
-        const Scene = makeBoardScene(engine, container, (bx, by) => engine.sendCursor(bx, by));
+        const Scene = makeBoardScene(engine, container, (bx, by, cam) => engine.sendCursor(bx, by, cam));
 
         this._game = new PhaserGame({
             type:            AUTO,

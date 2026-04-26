@@ -540,8 +540,12 @@ class GameService
                 $roomId,
                 $guestId,
                 $this->getDisplayName($guestId),
-                (float) ($moveData['x'] ?? 0),
-                (float) ($moveData['y'] ?? 0),
+                (float) ($moveData['x']    ?? 0),
+                (float) ($moveData['y']    ?? 0),
+                (float) ($moveData['camX'] ?? 0),
+                (float) ($moveData['camY'] ?? 0),
+                (float) ($moveData['camW'] ?? 0),
+                (float) ($moveData['camH'] ?? 0),
             ));
 
             return $state;

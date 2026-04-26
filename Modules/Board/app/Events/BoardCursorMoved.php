@@ -18,6 +18,10 @@ class BoardCursorMoved implements ShouldBroadcastNow
         public string $displayName,
         public float  $x,
         public float  $y,
+        public float  $camX,
+        public float  $camY,
+        public float  $camW,
+        public float  $camH,
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -37,6 +41,10 @@ class BoardCursorMoved implements ShouldBroadcastNow
             'displayName' => $this->displayName,
             'x'           => $this->x,
             'y'           => $this->y,
+            'camX'        => $this->camX,
+            'camY'        => $this->camY,
+            'camW'        => $this->camW,
+            'camH'        => $this->camH,
         ];
     }
 }

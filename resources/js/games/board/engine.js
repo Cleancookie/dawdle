@@ -14,9 +14,10 @@
  *   gameState:  object,
  * }} GameConfig
  *
- * @typedef {{ boardX: number, boardY: number, name: string, color: string }} CursorEntry
+ * @typedef {{ x: number, y: number, w: number, h: number }} CameraState  world-space position and size of the viewport
+ * @typedef {{ boardX: number, boardY: number, name: string, color: string, cam: CameraState }} CursorEntry
  * @typedef {{ cursors: Record<string, CursorEntry> }} BoardState
- * @typedef {{ type: 'board.cursor', x: number, y: number } | { type: 'board.end' }} BoardMove
+ * @typedef {{ type: 'board.cursor', x: number, y: number, camX: number, camY: number, camW: number, camH: number } | { type: 'board.end' }} BoardMove
  */
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -71,14 +72,17 @@ export default class BoardEngine extends SimpleEmitter {
                         boardY: payload.y,
                         name:   payload.displayName,
                         color:  this._colorMap[payload.guestId] ?? '#6b7280',
+                        cam:    { x: payload.camX, y: payload.camY, w: payload.camW, h: payload.camH },
                     },
                 },
             });
         }
     }
 
-    /** @param {number} bx @param {number} by */
-    sendCursor(bx, by) { this._onMove({ type: 'board.cursor', x: bx, y: by }); }
+    /** @param {number} bx @param {number} by @param {CameraState} cam */
+    sendCursor(bx, by, cam) {
+        this._onMove({ type: 'board.cursor', x: bx, y: by, camX: cam.x, camY: cam.y, camW: cam.w, camH: cam.h });
+    }
     endSession()        { this._onMove({ type: 'board.end' }); }
 
     /** @param {Partial<BoardState>} patch */
