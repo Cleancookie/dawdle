@@ -1,11 +1,9 @@
 /** @import { GameConfig, CursorEntry } from './engine.js' */
 /** @typedef {{ container: Phaser.GameObjects.Container, gfx: Phaser.GameObjects.Graphics, label: Phaser.GameObjects.Text }} CursorObj */
 
-import { Game as PhaserGame, Scene, AUTO, Scale, Math as PMath } from 'phaser';
+import { Game as PhaserGame, Scene, AUTO, Scale } from 'phaser';
 
 const GRID_SIZE          = 32;
-const MIN_ZOOM           = 0.1;
-const MAX_ZOOM           = 5;
 const CURSOR_THROTTLE_MS = 56;
 
 function hexToInt(hex) {
@@ -40,19 +38,6 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
                 .setScrollFactor(0)
                 .setDepth(-1);
 
-            // Scale label — DOM overlay, immune to camera zoom drift
-            this._scaleEl = Object.assign(document.createElement('div'), {
-                textContent: '100%',
-            });
-            Object.assign(this._scaleEl.style, {
-                position: 'absolute', bottom: '12px', right: '12px',
-                font: '600 11px ui-sans-serif, system-ui, sans-serif',
-                color: '#64748b', background: '#e2e8f0',
-                padding: '3px 8px', borderRadius: '6px',
-                pointerEvents: 'none', zIndex: '10',
-            });
-            domContainer.appendChild(this._scaleEl);
-
             /** @type {Record<string, CursorObj>} */
             this._cursors = {};
 
@@ -66,73 +51,28 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
 
         update() {
             const cam = this.cameras.main;
-            const z   = cam.zoom;
 
-            // Align tile grid to world origin
+            // Align tile grid to world origin as camera pans
             const ox = ((cam.scrollX % GRID_SIZE) + GRID_SIZE) % GRID_SIZE;
             const oy = ((cam.scrollY % GRID_SIZE) + GRID_SIZE) % GRID_SIZE;
-            this._grid.setTileScale(z).setTilePosition(ox * z, oy * z);
-
-            // Keep cursors a fixed screen size regardless of zoom
-            const inv = 1 / z;
-            for (const obj of Object.values(this._cursors)) {
-                obj.container.setScale(inv);
-            }
-
-            this._scaleEl.textContent = Math.round(z * 100) + '%';
+            this._grid.setTilePosition(ox, oy);
         }
 
         // ── Input ─────────────────────────────────────────────────────────────
 
         _setupInput(onCursorMove) {
-            const ptrs = new Map();
-            let pinch0  = null; // { dist, wx0, wy0, midX, midY, zoom }
-            let drag    = null; // { wx, wy } — world point locked under finger
+            let drag     = null;
             let lastSent = 0;
 
             this.input.on('pointerdown', (p) => {
                 const cam = this.cameras.main;
-                ptrs.set(p.id, { x: p.x, y: p.y });
-
-                if (ptrs.size === 2) {
-                    // Begin pinch — capture world point at current midpoint
-                    const [a, b] = ptrs.values();
-                    const midX = (a.x + b.x) / 2;
-                    const midY = (a.y + b.y) / 2;
-                    pinch0 = {
-                        dist: Math.hypot(a.x - b.x, a.y - b.y),
-                        zoom: cam.zoom,
-                        wx0:  cam.scrollX + midX / cam.zoom,
-                        wy0:  cam.scrollY + midY / cam.zoom,
-                        midX, midY,
-                    };
-                    drag = null;
-                } else if (ptrs.size === 1) {
-                    drag = {
-                        startScrollX: cam.scrollX, startScrollY: cam.scrollY,
-                        startX: p.x, startY: p.y,
-                    };
-                }
+                drag = { startScrollX: cam.scrollX, startScrollY: cam.scrollY, startX: p.x, startY: p.y };
             });
 
             this.input.on('pointermove', (p) => {
-                ptrs.set(p.id, { x: p.x, y: p.y });
                 const cam = this.cameras.main;
 
-                if (ptrs.size >= 2 && pinch0) {
-                    const [a, b] = ptrs.values();
-                    const dist = Math.hypot(a.x - b.x, a.y - b.y);
-                    const midX = (a.x + b.x) / 2;
-                    const midY = (a.y + b.y) / 2;
-                    const newZ = PMath.Clamp(pinch0.zoom * (dist / pinch0.dist), MIN_ZOOM, MAX_ZOOM);
-                    // Keep the initial midpoint world-position under the current midpoint
-                    cam.zoom    = newZ;
-                    cam.scrollX = pinch0.wx0 - midX / newZ;
-                    cam.scrollY = pinch0.wy0 - midY / newZ;
-                    return;
-                }
-
-                if (p.isDown && drag && ptrs.size < 2) {
+                if (p.isDown && drag) {
                     cam.scrollX = drag.startScrollX - (p.x - drag.startX);
                     cam.scrollY = drag.startScrollY - (p.y - drag.startY);
                 }
@@ -144,33 +84,14 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
                     onCursorMove(wp.x, wp.y, {
                         x: cam.scrollX,
                         y: cam.scrollY,
-                        w: cam.width / cam.zoom,
-                        h: cam.height / cam.zoom,
+                        w: cam.width,
+                        h: cam.height,
                     });
                 }
             });
 
-            this.input.on('pointerup', (p) => {
-                ptrs.delete(p.id);
-                if (ptrs.size < 2) pinch0 = null;
-                if (ptrs.size === 0) drag = null;
-            });
-            this.input.on('pointercancel', (p) => {
-                ptrs.delete(p.id);
-                if (ptrs.size < 2) pinch0 = null;
-                if (ptrs.size === 0) drag = null;
-            });
-
-            this.input.on('wheel', (p, _o, _dx, dy) => {
-                const cam    = this.cameras.main;
-                const factor = Math.exp(-dy * (p.event?.ctrlKey ? 0.01 : 0.001));
-                const newZ   = PMath.Clamp(cam.zoom * factor, MIN_ZOOM, MAX_ZOOM);
-                const wx = cam.scrollX + p.x / cam.zoom;
-                const wy = cam.scrollY + p.y / cam.zoom;
-                cam.zoom    = newZ;
-                cam.scrollX = wx - p.x / cam.zoom;
-                cam.scrollY = wy - p.y / cam.zoom;
-            });
+            this.input.on('pointerup',     () => { drag = null; });
+            this.input.on('pointercancel', () => { drag = null; });
         }
 
         // ── Cursor sync ───────────────────────────────────────────────────────
@@ -221,7 +142,6 @@ function makeBoardScene(engine, domContainer, onCursorMove) {
 
         shutdown() {
             engine.off('stateChanged', this._onState);
-            this._scaleEl.remove();
         }
     };
 }

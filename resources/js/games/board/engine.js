@@ -14,7 +14,7 @@
  *   gameState:  object,
  * }} GameConfig
  *
- * @typedef {{ x: number, y: number, w: number, h: number }} CameraState  world-space position and size of the viewport
+ * @typedef {{ x: number, y: number, w: number, h: number }} CameraState  scroll position (world) + viewport pixel dimensions
  * @typedef {{ boardX: number, boardY: number, name: string, color: string, cam: CameraState }} CursorEntry
  * @typedef {{ cursors: Record<string, CursorEntry> }} BoardState
  * @typedef {{ type: 'board.cursor', x: number, y: number, camX: number, camY: number, camW: number, camH: number } | { type: 'board.end' }} BoardMove
