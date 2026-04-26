@@ -17,11 +17,12 @@
  * @typedef {{ x: number, y: number, w: number, h: number }} CameraState  scroll position (world) + viewport pixel dimensions
  * @typedef {{ boardX: number, boardY: number, name: string, color: string, cam: CameraState }} CursorEntry
  * @typedef {{ id: string, type: string, label: string, color: string, x: number, y: number, holderId: string|null }} BoardObject
- * @typedef {{ cursors: Record<string, CursorEntry>, objects: Record<string, BoardObject> }} BoardState
- * @typedef {{ type: 'board.cursor',       x: number, y: number, camX: number, camY: number, camW: number, camH: number }
- *         | { type: 'board.object_move',  id: string, x: number, y: number }
- *         | { type: 'board.object_take',  id: string }
- *         | { type: 'board.object_place', id: string, x: number, y: number }
+ * @typedef {{ cursors: Record<string, CursorEntry>, objects: Record<string, BoardObject>, grabbed: Record<string, string> }} BoardState
+ * @typedef {{ type: 'board.cursor',        x: number, y: number, camX: number, camY: number, camW: number, camH: number }
+ *         | { type: 'board.object_grab',   id: string }
+ *         | { type: 'board.object_move',   id: string, x: number, y: number }
+ *         | { type: 'board.object_take',   id: string }
+ *         | { type: 'board.object_place',  id: string, x: number, y: number }
  *         | { type: 'board.end' }} BoardMove
  */
 
@@ -53,7 +54,7 @@ export default class BoardEngine extends SimpleEmitter {
         this._colorMap = colorMap;
 
         /** @type {BoardState} */
-        this.state = { cursors: {}, objects: {} };
+        this.state = { cursors: {}, objects: {}, grabbed: {} };
 
         this._fetchInitialObjects();
     }
@@ -66,6 +67,13 @@ export default class BoardEngine extends SimpleEmitter {
                     this._colorMap[p.guestId] = PLAYER_COLORS[i % PLAYER_COLORS.length];
                 }
             });
+            // Re-fetch state when we ourselves join mid-game (spectator → player)
+            if (payload.guestId === this._config.guestId) this._fetchInitialObjects();
+            return;
+        }
+
+        if (name === 'board.object_grabbed') {
+            this._setState({ grabbed: { ...this.state.grabbed, [payload.objectId]: payload.guestId } });
             return;
         }
 
@@ -89,9 +97,15 @@ export default class BoardEngine extends SimpleEmitter {
         if (name === 'board.objects_changed') {
             const patch = {};
             for (const obj of payload.objects) patch[obj.id] = obj;
-            this._setState({ objects: { ...this.state.objects, ...patch } });
+            // Clear grab lock for any objects that just moved
+            const newGrabbed = { ...this.state.grabbed };
+            for (const obj of payload.objects) delete newGrabbed[obj.id];
+            this._setState({ objects: { ...this.state.objects, ...patch }, grabbed: newGrabbed });
         }
     }
+
+    /** @param {string} id — broadcast to others that this object is being dragged */
+    grabObject(id) { this._onMove({ type: 'board.object_grab', id }); }
 
     /** @param {number} bx @param {number} by @param {CameraState} cam */
     sendCursor(bx, by, cam) {

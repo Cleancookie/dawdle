@@ -10,6 +10,7 @@ use Modules\Game\Events\GamePlayerJoined;
 use Modules\Game\Models\GameResult;
 use Modules\Game\Models\GameSession;
 use Modules\Board\Events\BoardCursorMoved;
+use Modules\Board\Events\BoardObjectGrabbed;
 use Modules\Board\Events\BoardObjectsChanged;
 use Modules\Board\Services\GameLogic as BoardGameLogic;
 use Modules\Pack\Events\PackAnswerSubmitted;
@@ -534,6 +535,13 @@ class GameService
     {
         $roomId = $state['roomId'];
         $type   = $moveData['type'] ?? '';
+
+        if ($type === 'board.object_grab') {
+            $id = $moveData['id'] ?? null;
+            if (!$id || !isset($state['objects'][$id])) return $state;
+            broadcast(new BoardObjectGrabbed($roomId, $guestId, $id))->toOthers();
+            return $state;
+        }
 
         if ($type === 'board.cursor') {
             // Cursors are ephemeral — broadcast only, no Redis write

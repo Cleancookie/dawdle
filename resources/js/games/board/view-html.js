@@ -3,16 +3,16 @@
  */
 
 const GRID_SIZE          = 32;
-const CURSOR_THROTTLE_MS = 56;
+const CURSOR_THROTTLE_MS = 16;
 const CARD_W             = 64;
 const CARD_H             = 88;
 const HAND_PEEK          = 32;
 const HAND_PAD           = 8;
 const HAND_CARD_GAP      = 6;
 const HAND_OVERLAP_X     = 20;
-const HAND_EXPAND_H      = CARD_H + HAND_PAD * 2;  // 104 — full expanded height
+const HAND_EXPAND_H      = CARD_H + HAND_PAD * 2;  // 104
 const HAND_TWEEN_MS      = 180;
-const HAND_HOVER_ZONE    = 60;  // px above collapsed hand top that triggers auto-expand during drag
+const HAND_HOVER_ZONE    = 60;  // px above collapsed hand top that triggers auto-expand
 
 function css(el, s) { el.style.cssText = s; }
 
@@ -21,16 +21,18 @@ function css(el, s) { el.style.cssText = s; }
 export default class HtmlBoardView {
     /** @param {HTMLElement} container @param {import('./engine.js').default} engine @param {import('./engine.js').GameConfig} config */
     constructor(container, engine, config) {
-        this._engine   = engine;
-        this._myId     = config.guestId;
-        this._scrollX  = 0;
-        this._scrollY  = 0;
-        this._expanded = false;
-        this._handCards = {};  // id -> HTMLElement
-        this._boardObjs = {};  // id -> { el, dragging }
-        this._cursors   = {};  // guestId -> HTMLElement
-        this._lastSent  = 0;
-        this._gesture   = null;
+        this._engine        = engine;
+        this._myId          = config.guestId;
+        this._scrollX       = 0;
+        this._scrollY       = 0;
+        this._expanded      = false;
+        this._handCards     = {};   // id -> HTMLElement
+        this._handOrder     = [];   // ordered array of card IDs for layout/sort
+        this._boardObjs     = {};   // id -> { el, dragging }
+        this._cursors       = {};   // guestId -> HTMLElement
+        this._lastSent      = 0;
+        this._gesture       = null;
+        this._pendingInsert = null; // index to insert next arriving hand card at
 
         this._build(container);
         this._setupInput(container);
@@ -91,15 +93,18 @@ export default class HtmlBoardView {
     // ── Render ────────────────────────────────────────────────────────────────
 
     _render(state) {
-        this._syncObjects(state.objects);
+        this._syncObjects(state.objects, state.grabbed ?? {});
         this._syncHand(state.objects);
         this._syncCursors(state.cursors, state.objects);
     }
 
     // ── Board objects (world space) ───────────────────────────────────────────
 
-    /** @param {Record<string, BoardObject>} objects */
-    _syncObjects(objects) {
+    /**
+     * @param {Record<string, BoardObject>} objects
+     * @param {Record<string, string>} grabbed  objId → grabber guestId
+     */
+    _syncObjects(objects, grabbed) {
         for (const [id, ref] of Object.entries(this._boardObjs)) {
             if (!objects[id] || objects[id].holderId !== null) {
                 ref.el.remove();
@@ -114,6 +119,10 @@ export default class HtmlBoardView {
                 this._boardObjs[id].el.style.left = `${obj.x}px`;
                 this._boardObjs[id].el.style.top  = `${obj.y}px`;
             }
+            // Grabbed-by-another visual
+            const isGrabbed = !!grabbed[id];
+            this._boardObjs[id].el.style.opacity = isGrabbed ? '0.4' : '1';
+            this._boardObjs[id].el.style.cursor  = isGrabbed ? 'not-allowed' : 'grab';
         }
     }
 
@@ -146,14 +155,27 @@ export default class HtmlBoardView {
         const mine    = Object.values(objects).filter((o) => o.holderId === this._myId);
         const mineIds = new Set(mine.map((o) => o.id));
 
+        // Remove stale
         for (const [id, e] of Object.entries(this._handCards)) {
-            if (!mineIds.has(id)) { e.remove(); delete this._handCards[id]; }
+            if (!mineIds.has(id)) {
+                e.remove();
+                delete this._handCards[id];
+                this._handOrder = this._handOrder.filter((x) => x !== id);
+            }
         }
+        // Add new
         for (const obj of mine) {
             if (!this._handCards[obj.id]) {
                 const e = this._spawnHandCard(obj);
                 this._handCardsEl.appendChild(e);
                 this._handCards[obj.id] = e;
+                // Insert at pending slot or append
+                if (this._pendingInsert !== null) {
+                    this._handOrder.splice(this._pendingInsert, 0, obj.id);
+                    this._pendingInsert = null;
+                } else {
+                    this._handOrder.push(obj.id);
+                }
             }
         }
         this._layoutHand();
@@ -179,11 +201,61 @@ export default class HtmlBoardView {
         return e;
     }
 
-    _layoutHand() {
-        const spacing = this._expanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
-        Object.keys(this._handCards).forEach((id, i) => {
-            this._handCards[id].style.left = `${HAND_PAD + i * spacing}px`;
+    /**
+     * Layout hand cards.
+     * @param {{ excludeId?: string, insertGapAt?: number }} [opts]
+     *   excludeId  — card currently being dragged as a ghost (skip in layout)
+     *   insertGapAt — insert an empty slot at this index to preview where card will land
+     */
+    _layoutHand({ excludeId = null, insertGapAt = null } = {}) {
+        const ids = excludeId
+            ? this._handOrder.filter((id) => id !== excludeId)
+            : [...this._handOrder];
+
+        const cw = this._container.clientWidth;
+
+        if (!this._expanded) {
+            const n = ids.length;
+            const totalW = n > 0 ? CARD_W + (n - 1) * HAND_OVERLAP_X : 0;
+            const startX = Math.max(HAND_PAD, (cw - totalW) / 2);
+            ids.forEach((id, i) => {
+                const el = this._handCards[id];
+                if (el) el.style.left = `${startX + i * HAND_OVERLAP_X}px`;
+            });
+            return;
+        }
+
+        // Expanded — optional gap slot for drag-insert preview
+        const nSlots = insertGapAt !== null ? ids.length + 1 : ids.length;
+        const totalW = nSlots > 0 ? nSlots * CARD_W + Math.max(0, nSlots - 1) * HAND_CARD_GAP : 0;
+        const startX = Math.max(HAND_PAD, (cw - totalW) / 2);
+
+        let posI = 0;
+        ids.forEach((id) => {
+            const el = this._handCards[id];
+            if (!el) { posI++; return; }
+            const slotI = insertGapAt !== null && posI >= insertGapAt ? posI + 1 : posI;
+            el.style.left = `${startX + slotI * (CARD_W + HAND_CARD_GAP)}px`;
+            posI++;
         });
+    }
+
+    /**
+     * Returns the insert index (0…n) for a card being dragged at screen x=sx.
+     * excludeId: the card being dragged (excluded from slot calculations).
+     */
+    _handInsertIndex(sx, excludeId = null) {
+        const ids = excludeId
+            ? this._handOrder.filter((id) => id !== excludeId)
+            : [...this._handOrder];
+        const n = ids.length;
+        if (n === 0) return 0;
+        const totalW = n * CARD_W + Math.max(0, n - 1) * HAND_CARD_GAP;
+        const startX = Math.max(HAND_PAD, (this._container.clientWidth - totalW) / 2);
+        for (let i = 0; i < n; i++) {
+            if (sx < startX + i * (CARD_W + HAND_CARD_GAP) + CARD_W / 2) return i;
+        }
+        return n;
     }
 
     _setHandExpanded(expanded) {
@@ -199,15 +271,24 @@ export default class HtmlBoardView {
         return this._container.clientHeight - (this._expanded ? HAND_EXPAND_H : HAND_PEEK);
     }
 
+    _collapsedHandTop() {
+        return this._container.clientHeight - HAND_PEEK;
+    }
+
     /** @returns {string|null} */
     _handCardAt(sx, sy) {
         const localY = sy - this._handTop();
         if (localY < HAND_PAD || localY > HAND_PAD + CARD_H) return null;
         const spacing = this._expanded ? CARD_W + HAND_CARD_GAP : HAND_OVERLAP_X;
-        const ids = Object.keys(this._handCards);
-        for (let i = ids.length - 1; i >= 0; i--) {
-            const left = HAND_PAD + i * spacing;
-            if (sx >= left && sx <= left + CARD_W) return ids[i];
+        const n = this._handOrder.length;
+        const totalW = n > 0
+            ? (this._expanded ? n * CARD_W + (n - 1) * HAND_CARD_GAP : CARD_W + (n - 1) * HAND_OVERLAP_X)
+            : 0;
+        const startX = Math.max(HAND_PAD, (this._container.clientWidth - totalW) / 2);
+        // Check in reverse so top card (rightmost in z-order) wins
+        for (let i = this._handOrder.length - 1; i >= 0; i--) {
+            const left = startX + i * spacing;
+            if (sx >= left && sx <= left + CARD_W) return this._handOrder[i];
         }
         return null;
     }
@@ -229,9 +310,7 @@ export default class HtmlBoardView {
                 this._cursorLayer.appendChild(this._cursors[id]);
             }
             const e = this._cursors[id];
-            const sx = c.boardX - this._scrollX;
-            const sy = c.boardY - this._scrollY;
-            e.style.transform = `translate(${sx}px,${sy}px)`;
+            e.style.transform = `translate(${c.boardX - this._scrollX}px,${c.boardY - this._scrollY}px)`;
             const badge = e.querySelector('[data-badge]');
             if (badge) badge.textContent = count > 0 ? String(count) : '';
         }
@@ -284,14 +363,18 @@ export default class HtmlBoardView {
                 this._container.setPointerCapture(e.pointerId);
                 const ghost = this._makeGhost(cardId, sx, sy);
                 this._handCards[cardId].style.opacity = '0.3';
-                this._gesture = { type: 'handDrag', id: cardId, pointerId: e.pointerId, ghost, moved: false, sx, sy, autoExpanded: false };
+                this._gesture = {
+                    type: 'handDrag', id: cardId, pointerId: e.pointerId,
+                    ghost, moved: false, sx, sy,
+                    wasExpanded: this._expanded, autoExpanded: false,
+                    insertIndex: this._handOrder.indexOf(cardId),
+                };
             } else {
                 this._gesture = { type: 'handTap', pointerId: e.pointerId, sx, sy };
             }
             return;
         }
 
-        // Check for board object under pointer
         const hit = e.target.closest?.('[data-obj-id]');
         if (hit && this._worldEl.contains(hit)) {
             const id  = hit.dataset.objId;
@@ -301,19 +384,24 @@ export default class HtmlBoardView {
                 ref.dragging = true;
                 ref.el.style.cursor  = 'grabbing';
                 ref.el.style.zIndex  = '5';
-                // Track grab offset from object center so card doesn't jump
                 const objWx = parseFloat(ref.el.style.left);
                 const objWy = parseFloat(ref.el.style.top);
                 const offX  = (sx + this._scrollX) - objWx;
                 const offY  = (sy + this._scrollY) - objWy;
-                this._gesture = { type: 'boardDrag', id, pointerId: e.pointerId, offX, offY, autoExpanded: false };
+                this._gesture = {
+                    type: 'boardDrag', id, pointerId: e.pointerId, offX, offY,
+                    wasExpanded: this._expanded, autoExpanded: false, insertIndex: 0,
+                };
+                this._engine.grabObject(id);
                 return;
             }
         }
 
-        // Pan
         this._container.setPointerCapture(e.pointerId);
-        this._gesture = { type: 'pan', pointerId: e.pointerId, startScrollX: this._scrollX, startScrollY: this._scrollY, startX: sx, startY: sy };
+        this._gesture = {
+            type: 'pan', pointerId: e.pointerId,
+            startScrollX: this._scrollX, startScrollY: this._scrollY, startX: sx, startY: sy,
+        };
     }
 
     _onMove(e) {
@@ -342,16 +430,44 @@ export default class HtmlBoardView {
             g.ghost.style.top  = `${sy - CARD_H / 2}px`;
         }
 
-        // Auto-expand hand when dragging a card near the bottom of the screen
+        // Auto-expand hand when a dragged card approaches the bottom
         if (g.type === 'boardDrag' || g.type === 'handDrag') {
-            const collapsedHandTop = this._container.clientHeight - HAND_PEEK;
-            const nearHand = sy >= collapsedHandTop - HAND_HOVER_ZONE;
+            const nearHand = sy >= this._collapsedHandTop() - HAND_HOVER_ZONE;
             if (nearHand && !this._expanded) {
                 this._setHandExpanded(true);
                 g.autoExpanded = true;
             } else if (!nearHand && g.autoExpanded) {
                 this._setHandExpanded(false);
                 g.autoExpanded = false;
+            }
+        }
+
+        // Sort preview: shift hand cards to show insert gap
+        if (g.type === 'boardDrag' && this._expanded) {
+            const inHandZone = sy >= this._handTop();
+            if (inHandZone) {
+                const idx = this._handInsertIndex(sx);
+                if (idx !== g.insertIndex) {
+                    g.insertIndex = idx;
+                    this._layoutHand({ insertGapAt: idx });
+                }
+            } else if (g.insertIndex !== null) {
+                g.insertIndex = null;
+                this._layoutHand();
+            }
+        }
+
+        if (g.type === 'handDrag' && this._expanded) {
+            const inHandZone = sy >= this._handTop();
+            if (inHandZone) {
+                const idx = this._handInsertIndex(sx, g.id);
+                if (idx !== g.insertIndex) {
+                    g.insertIndex = idx;
+                    this._layoutHand({ excludeId: g.id, insertGapAt: idx });
+                }
+            } else {
+                // Dragging above hand — show hand without the card
+                this._layoutHand({ excludeId: g.id });
             }
         }
 
@@ -387,15 +503,21 @@ export default class HtmlBoardView {
             ref.dragging        = false;
             ref.el.style.cursor = 'grab';
             ref.el.style.zIndex = '';
+
             if (sy >= this._handTop()) {
+                // Dropped into hand — record insert slot
+                this._pendingInsert = this._expanded
+                    ? this._handInsertIndex(sx)
+                    : this._handOrder.length;
                 this._engine.takeObject(g.id);
-                // Leave hand expanded — user can see the card they just picked up
             } else {
-                if (g.autoExpanded) this._setHandExpanded(false);
+                this._layoutHand(); // clear any gap preview
                 const wx = sx + this._scrollX - g.offX;
                 const wy = sy + this._scrollY - g.offY;
                 this._engine.moveObject(g.id, wx, wy);
             }
+            // Restore hand to pre-drag state if we auto-expanded it
+            if (g.autoExpanded) this._setHandExpanded(false);
             return;
         }
 
@@ -403,15 +525,28 @@ export default class HtmlBoardView {
             g.ghost.remove();
             if (this._handCards[g.id]) this._handCards[g.id].style.opacity = '';
 
-            if (!g.moved) return; // tap on hand card — no-op
+            if (!g.moved) {
+                // Tap — cancel, reset layout
+                this._layoutHand();
+                if (g.autoExpanded) this._setHandExpanded(false);
+                return;
+            }
 
             if (sy < this._handTop()) {
+                // Placed on board
+                this._handOrder = this._handOrder.filter((id) => id !== g.id);
+                this._layoutHand();
+                this._engine.placeObject(g.id, sx + this._scrollX, sy + this._scrollY);
                 if (g.autoExpanded) this._setHandExpanded(false);
-                const wx = sx + this._scrollX;
-                const wy = sy + this._scrollY;
-                this._engine.placeObject(g.id, wx, wy);
+            } else {
+                // Dropped back in hand — commit sort order
+                const finalIdx = this._expanded ? this._handInsertIndex(sx, g.id) : g.insertIndex;
+                const without  = this._handOrder.filter((id) => id !== g.id);
+                without.splice(finalIdx, 0, g.id);
+                this._handOrder = without;
+                this._layoutHand();
+                if (g.autoExpanded) this._setHandExpanded(false);
             }
-            // dropped back on hand — card stays in hand (state unchanged)
         }
     }
 
