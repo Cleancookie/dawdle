@@ -59,5 +59,9 @@ export function useRoom(roomId, guestId, { onJoining, onLeaving } = {}) {
         };
     }, [roomId, guestId]);
 
-    return { members, channel };
+    function updateMember(guestId, updates) {
+        setMembers((prev) => prev.map((m) => m.id === guestId ? { ...m, ...updates } : m));
+    }
+
+    return { members, channel, updateMember };
 }

@@ -233,7 +233,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         return () => clearInterval(id);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const { members, channel } = useRoom(room?.roomId, guest.guestId);
+    const { members, channel, updateMember } = useRoom(room?.roomId, guest.guestId);
     const isHost = room?.hostGuestId === guest.guestId;
 
     useEffect(() => {
@@ -256,20 +256,19 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                         'X-Guest-ID': guest.guestId,
                     },
                     body: JSON.stringify({ display_name: guest.displayName }),
-                }).then((res) => {
-                    if (res.ok) {
+                })
+                    .then((res) => res.ok ? res.json() : null)
+                    .then((joinData) => {
+                        if (!joinData) { navigate('/'); return; }
                         setRoom(data);
                         setSelectedGame(data.selectedGame ?? 'tic_tac_toe');
-
-                        // If a game is in progress, store the session so the lobby can
-                        // offer a "Watch game" button, but keep the user in the lobby.
                         if (data.status === 'playing' && data.activeGame) {
                             setGameSession(data.activeGame);
+                            // Reconnecting player (was in the game) → restore game view.
+                            // Fresh spectator → stay in lobby with Watch game button.
+                            if (joinData.role === 'player') setPhase('playing');
                         }
-                    } else {
-                        navigate('/');
-                    }
-                });
+                    });
             })
             .finally(() => setLoading(false));
     }, [roomCode, guest.guestId, navigate]);
@@ -279,6 +278,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         channel.listen('.chat.message', (data) => setMessages((prev) => [...prev, data]));
         return () => channel.stopListening('.chat.message');
     }, [channel]);
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.room.player_updated', ({ guestId, displayName }) => {
+            updateMember(guestId, { displayName });
+        });
+        return () => channel.stopListening('.room.player_updated');
+    }, [channel]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (!channel) return;
@@ -494,6 +501,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         const trimmed = nameInput.trim();
         if (!trimmed || trimmed === guest.displayName) { setEditingName(false); return; }
         guest.setDisplayName(trimmed);
+        updateMember(guest.guestId, { displayName: trimmed }); // update own presence entry locally
         setEditingName(false);
         await fetch('/api/v1/guests/display-name', {
             method: 'PATCH',
