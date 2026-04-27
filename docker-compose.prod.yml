@@ -81,6 +81,27 @@ services:
     networks:
       - app
 
+  # ── Laravel scheduler ─────────────────────────────────────────────────────
+  schedule:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - .:/var/www/html
+    env_file: .env
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: production
+      DB_HOST: mysql
+      REDIS_HOST: redis
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - app
+
   # ── Laravel queue worker ───────────────────────────────────────────────────
   queue:
     build:

@@ -3,6 +3,7 @@
 namespace Modules\Room\Providers;
 
 use Illuminate\Console\Scheduling\Schedule;
+use Modules\Room\Console\Commands\PruneEmptyRooms;
 use Nwidart\Modules\Support\ModuleServiceProvider;
 
 class RoomServiceProvider extends ModuleServiceProvider
@@ -22,7 +23,7 @@ class RoomServiceProvider extends ModuleServiceProvider
      *
      * @var string[]
      */
-    // protected array $commands = [];
+    protected array $commands = [PruneEmptyRooms::class];
 
     /**
      * Provider classes to register.
@@ -39,8 +40,8 @@ class RoomServiceProvider extends ModuleServiceProvider
      *
      * @param  $schedule
      */
-    // protected function configureSchedules(Schedule $schedule): void
-    // {
-    //     $schedule->command('inspire')->hourly();
-    // }
+    protected function configureSchedules(Schedule $schedule): void
+    {
+        $schedule->command('room:prune')->everyFiveMinutes();
+    }
 }

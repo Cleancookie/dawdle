@@ -174,6 +174,7 @@ class RoomService
 
         if ($role === 'player') {
             Redis::sadd("dawdle:room:{$room->id}:players", $guestId);
+            Redis::del("dawdle:room:{$room->id}:empty_since");
         }
 
         broadcast(new PlayerJoined($room->id, $guestId, $displayName, $role))->toOthers();
@@ -222,6 +223,10 @@ class RoomService
         Redis::srem("dawdle:room:{$roomId}:players", $guestId);
         Redis::srem("dawdle:room:{$roomId}:ready", $guestId);
         broadcast(new PlayerLeft($roomId, $guestId, $displayName));
+
+        if (Redis::scard("dawdle:room:{$roomId}:players") === 0) {
+            Redis::set("dawdle:room:{$roomId}:empty_since", now()->timestamp, 'EX', 7200);
+        }
 
         if ($room->host_guest_id === $guestId) {
             $nextHost = Redis::srandmember("dawdle:room:{$roomId}:players");

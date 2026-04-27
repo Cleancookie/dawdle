@@ -82,6 +82,30 @@ services:
     networks:
       - dawdle
 
+  # ── Laravel scheduler ─────────────────────────────────────────────────────
+  schedule:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - .:/var/www/html
+    environment:
+      SKIP_BOOTSTRAP: "true"
+      APP_ENV: local
+      DB_HOST: mysql
+      DB_DATABASE: ${DB_DATABASE:-dawdle}
+      DB_USERNAME: ${DB_USERNAME:-dawdle}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      REDIS_HOST: redis
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - dawdle
+
   # ── Laravel queue worker ───────────────────────────────────────────────────
   queue:
     build:
