@@ -26,6 +26,7 @@ services:
       SESSION_DRIVER: redis
       QUEUE_CONNECTION: redis
       BROADCAST_CONNECTION: reverb
+      PULSE_CACHE_DRIVER: array
       REVERB_APP_ID: ${REVERB_APP_ID:-dawdle-local}
       REVERB_APP_KEY: ${REVERB_APP_KEY:-dawdle-key}
       REVERB_APP_SECRET: ${REVERB_APP_SECRET:-dawdle-secret}
