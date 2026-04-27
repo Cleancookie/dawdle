@@ -16,7 +16,7 @@ class GameSession extends Model
 
     protected $casts = [
         'started_at' => 'datetime',
-        'ended_at'   => 'datetime',
+        'ended_at' => 'datetime',
     ];
 
     public function results(): HasMany

@@ -10,7 +10,7 @@ class Room extends Model
 {
     use HasUlids;
 
-    protected $fillable = ['code', 'status', 'host_guest_id', 'closed_at'];
+    protected $fillable = ['code', 'status', 'host_guest_id', 'is_public', 'closed_at'];
 
     protected $casts = ['closed_at' => 'datetime'];
 

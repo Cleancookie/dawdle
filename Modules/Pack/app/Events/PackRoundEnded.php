@@ -44,12 +44,12 @@ class PackRoundEnded implements ShouldBroadcastNow
         }
 
         return [
-            'gameId'        => $this->gameId,
-            'question'      => $this->question,
-            'answers'       => $this->answers,
-            'mostCommon'    => $this->mostCommon,
-            'winners'       => $this->winners,
-            'scores'        => $this->scores,
+            'gameId' => $this->gameId,
+            'question' => $this->question,
+            'answers' => $this->answers,
+            'mostCommon' => $this->mostCommon,
+            'winners' => $this->winners,
+            'scores' => $this->scores,
             'systemMessage' => $systemMessage,
         ];
     }

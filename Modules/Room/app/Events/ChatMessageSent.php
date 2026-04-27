@@ -22,7 +22,7 @@ class ChatMessageSent implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string
@@ -33,10 +33,10 @@ class ChatMessageSent implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'     => $this->guestId,
+            'guestId' => $this->guestId,
             'displayName' => $this->displayName,
-            'message'     => $this->message,
-            'timestamp'   => $this->timestamp,
+            'message' => $this->message,
+            'timestamp' => $this->timestamp,
         ];
     }
 }

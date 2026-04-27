@@ -20,7 +20,7 @@ class PlayerReady implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string

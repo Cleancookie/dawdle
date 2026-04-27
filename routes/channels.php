@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Request;
 
 Broadcast::channel('room.{roomId}', function ($user, string $roomId) {
     $guestId = Request::header('X-Guest-ID');
-    if (!$guestId || !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guestId)) {
+    if (! $guestId || ! preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $guestId)) {
         return false;
     }
 
@@ -16,14 +16,15 @@ Broadcast::channel('room.{roomId}', function ($user, string $roomId) {
     }
 
     return [
-        'id'          => $guestId,
+        'id' => $guestId,
         'displayName' => $guest['displayName'] ?? 'Guest',
-        'role'        => $guest['role'] ?? 'spectator',
+        'role' => $guest['role'] ?? 'spectator',
     ];
 });
 
 // Private per-player game channel — used to send drawer-only events (e.g. pict.word_hint)
 Broadcast::channel('game.{gameId}.{channelGuestId}', function ($user, string $gameId, string $channelGuestId) {
     $guestId = Request::header('X-Guest-ID');
+
     return $guestId === $channelGuestId;
 });

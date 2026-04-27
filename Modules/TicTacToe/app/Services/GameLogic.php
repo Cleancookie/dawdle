@@ -5,6 +5,7 @@ namespace Modules\TicTacToe\Services;
 class GameLogic
 {
     public const MIN_PLAYERS = 2;
+
     public const MAX_PLAYERS = 2;
 
     private const WIN_LINES = [

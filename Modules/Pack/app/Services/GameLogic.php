@@ -5,6 +5,7 @@ namespace Modules\Pack\Services;
 class GameLogic
 {
     public const MIN_PLAYERS = 1;
+
     public const MAX_PLAYERS = 8;
 
     private const QUESTIONS = [
@@ -48,19 +49,19 @@ class GameLogic
         $totalRounds = min(8, count($questions));
 
         return [
-            'gameType'       => 'pack',
-            'gameId'         => $gameId,
-            'roomId'         => $roomId,
-            'playerOrder'    => $playerIds,
-            'status'         => 'in_progress',
-            'round'          => 1,
-            'totalRounds'    => $totalRounds,
-            'phase'          => 'answering',
-            'question'       => $questions[0],
-            'answers'        => [],
+            'gameType' => 'pack',
+            'gameId' => $gameId,
+            'roomId' => $roomId,
+            'playerOrder' => $playerIds,
+            'status' => 'in_progress',
+            'round' => 1,
+            'totalRounds' => $totalRounds,
+            'phase' => 'answering',
+            'question' => $questions[0],
+            'answers' => [],
             'pendingAnswers' => [],
-            'scores'         => $scores,
-            'timeLimit'      => 30,
+            'scores' => $scores,
+            'timeLimit' => 30,
             'shuffledQuestions' => $questions,
         ];
     }
@@ -132,7 +133,7 @@ class GameLogic
         $state['phase'] = 'reveal';
         $state['roundResult'] = [
             'mostCommon' => $mostCommon,
-            'winners'    => $winners,
+            'winners' => $winners,
         ];
 
         return $state;

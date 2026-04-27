@@ -4,20 +4,20 @@ namespace Modules\Game\Enums;
 
 enum GameType: string
 {
-    case TicTacToe  = 'tic_tac_toe';
+    case TicTacToe = 'tic_tac_toe';
     case Pictionary = 'pictionary';
-    case Spotto     = 'spotto';
-    case Pack       = 'pack';
-    case Board      = 'board';
+    case Spotto = 'spotto';
+    case Pack = 'pack';
+    case Board = 'board';
 
     public function label(): string
     {
-        return match($this) {
-            self::TicTacToe  => 'Tic Tac Toe',
+        return match ($this) {
+            self::TicTacToe => 'Tic Tac Toe',
             self::Pictionary => 'Pictionary',
-            self::Spotto     => 'Spotto',
-            self::Pack       => 'Pack',
-            self::Board      => 'BaseBoard',
+            self::Spotto => 'Spotto',
+            self::Pack => 'Pack',
+            self::Board => 'BaseBoard',
         };
     }
 

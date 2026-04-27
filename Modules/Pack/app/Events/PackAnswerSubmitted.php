@@ -33,10 +33,10 @@ class PackAnswerSubmitted implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId'        => $this->gameId,
-            'guestId'       => $this->guestId,
+            'gameId' => $this->gameId,
+            'guestId' => $this->guestId,
             'answeredCount' => $this->answeredCount,
-            'totalCount'    => $this->totalCount,
+            'totalCount' => $this->totalCount,
             'systemMessage' => "{$this->answeredCount}/{$this->totalCount} answered",
         ];
     }

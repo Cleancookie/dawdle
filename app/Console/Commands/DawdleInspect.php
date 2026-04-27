@@ -8,14 +8,15 @@ use Illuminate\Support\Facades\Redis;
 
 class DawdleInspect extends Command
 {
-    protected $signature   = 'dawdle:inspect {type : room | game | guest} {id : Room code, game ULID, or guest UUID}';
+    protected $signature = 'dawdle:inspect {type : room | game | guest} {id : Room code, game ULID, or guest UUID}';
+
     protected $description = 'Inspect live Dawdle state across Redis and MySQL';
 
     public function handle(): int
     {
         match ($this->argument('type')) {
-            'room'  => $this->room($this->argument('id')),
-            'game'  => $this->game($this->argument('id')),
+            'room' => $this->room($this->argument('id')),
+            'game' => $this->game($this->argument('id')),
             'guest' => $this->guest($this->argument('id')),
             default => $this->error('type must be: room, game, or guest'),
         };
@@ -26,7 +27,11 @@ class DawdleInspect extends Command
     private function room(string $code): void
     {
         $row = DB::table('rooms')->where('code', $code)->first();
-        if (!$row) { $this->error("Room not found: {$code}"); return; }
+        if (! $row) {
+            $this->error("Room not found: {$code}");
+
+            return;
+        }
 
         $id = $row->id;
         $this->title("Room: {$code}  (id: {$id})");
@@ -38,10 +43,10 @@ class DawdleInspect extends Command
         $this->dump(Redis::hgetall("dawdle:room:{$id}") ?: []);
 
         $this->section('Redis · dawdle:room:{id}:players (set)');
-        $this->line('  ' . implode(', ', Redis::smembers("dawdle:room:{$id}:players") ?: ['(empty)']));
+        $this->line('  '.implode(', ', Redis::smembers("dawdle:room:{$id}:players") ?: ['(empty)']));
 
         $this->section('Redis · dawdle:room:{id}:ready (set)');
-        $this->line('  ' . implode(', ', Redis::smembers("dawdle:room:{$id}:ready") ?: ['(empty)']));
+        $this->line('  '.implode(', ', Redis::smembers("dawdle:room:{$id}:ready") ?: ['(empty)']));
 
         $this->section('DB · room_guests');
         $this->dump(DB::table('room_guests')->where('room_id', $id)->get()->toArray());

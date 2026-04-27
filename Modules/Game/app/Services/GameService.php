@@ -4,16 +4,16 @@ namespace Modules\Game\Services;
 
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
-use Modules\Game\Enums\GameType;
-use Modules\Game\Events\GameEnded;
-use Modules\Game\Events\GamePlayerJoined;
-use Modules\Game\Models\GameResult;
-use Modules\Game\Models\GameSession;
 use Modules\Board\Events\BoardCursorMoved;
 use Modules\Board\Events\BoardObjectDragging;
 use Modules\Board\Events\BoardObjectGrabbed;
 use Modules\Board\Events\BoardObjectsChanged;
 use Modules\Board\Services\GameLogic as BoardGameLogic;
+use Modules\Game\Enums\GameType;
+use Modules\Game\Events\GameEnded;
+use Modules\Game\Events\GamePlayerJoined;
+use Modules\Game\Models\GameResult;
+use Modules\Game\Models\GameSession;
 use Modules\Pack\Events\PackAnswerSubmitted;
 use Modules\Pack\Events\PackRoundEnded;
 use Modules\Pack\Events\PackRoundStarted;
@@ -85,9 +85,9 @@ class GameService
 
         match (GameType::from($gameType)) {
             GameType::Pictionary => $this->broadcastRoundStarted($roomId, $gameId, $state),
-            GameType::Spotto     => $this->broadcastSpottoRoundStarted($roomId, $gameId, $state),
-            GameType::Pack       => $this->broadcastPackRoundStarted($roomId, $gameId, $state),
-            default              => null,
+            GameType::Spotto => $this->broadcastSpottoRoundStarted($roomId, $gameId, $state),
+            GameType::Pack => $this->broadcastPackRoundStarted($roomId, $gameId, $state),
+            default => null,
         };
 
         return ['gameId' => $gameId, 'state' => $state];
@@ -104,11 +104,11 @@ class GameService
         $gameType = $state['gameType'];
 
         return match (GameType::from($gameType)) {
-            GameType::TicTacToe  => $this->applyTttMove($gameId, $guestId, $moveData, $state),
+            GameType::TicTacToe => $this->applyTttMove($gameId, $guestId, $moveData, $state),
             GameType::Pictionary => $this->applyPictionaryMove($gameId, $guestId, $moveData, $state),
-            GameType::Spotto     => $this->applySpottoMove($gameId, $guestId, $moveData, $state),
-            GameType::Pack       => $this->applyPackMove($gameId, $guestId, $moveData, $state),
-            GameType::Board      => $this->applyBoardMove($gameId, $guestId, $moveData, $state),
+            GameType::Spotto => $this->applySpottoMove($gameId, $guestId, $moveData, $state),
+            GameType::Pack => $this->applyPackMove($gameId, $guestId, $moveData, $state),
+            GameType::Board => $this->applyBoardMove($gameId, $guestId, $moveData, $state),
         };
     }
 
@@ -145,9 +145,9 @@ class GameService
         $state['playerOrder'][] = $guestId;
         Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
 
-        $roomId      = $state['roomId'];
+        $roomId = $state['roomId'];
         $displayName = $this->getDisplayName($guestId);
-        $players     = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
+        $players = array_map(fn ($id) => ['guestId' => $id], $state['playerOrder']);
 
         broadcast(new GamePlayerJoined($roomId, $gameId, $guestId, $displayName, $players));
 
@@ -160,22 +160,22 @@ class GameService
     public function minPlayers(string $gameType): int
     {
         return match (GameType::from($gameType)) {
-            GameType::TicTacToe  => TttGameLogic::MIN_PLAYERS,
+            GameType::TicTacToe => TttGameLogic::MIN_PLAYERS,
             GameType::Pictionary => PictGameLogic::MIN_PLAYERS,
-            GameType::Spotto     => SpottoGameLogic::MIN_PLAYERS,
-            GameType::Pack       => PackGameLogic::MIN_PLAYERS,
-            GameType::Board      => BoardGameLogic::MIN_PLAYERS,
+            GameType::Spotto => SpottoGameLogic::MIN_PLAYERS,
+            GameType::Pack => PackGameLogic::MIN_PLAYERS,
+            GameType::Board => BoardGameLogic::MIN_PLAYERS,
         };
     }
 
     private function maxPlayers(GameType $type): int
     {
         return match ($type) {
-            GameType::TicTacToe  => TttGameLogic::MAX_PLAYERS,
+            GameType::TicTacToe => TttGameLogic::MAX_PLAYERS,
             GameType::Pictionary => PictGameLogic::MAX_PLAYERS,
-            GameType::Spotto     => SpottoGameLogic::MAX_PLAYERS,
-            GameType::Pack       => PackGameLogic::MAX_PLAYERS,
-            GameType::Board      => BoardGameLogic::MAX_PLAYERS,
+            GameType::Spotto => SpottoGameLogic::MAX_PLAYERS,
+            GameType::Pack => PackGameLogic::MAX_PLAYERS,
+            GameType::Board => BoardGameLogic::MAX_PLAYERS,
         };
     }
 
@@ -449,13 +449,13 @@ class GameService
     private function applyPackMove(string $gameId, string $guestId, array $moveData, array $state): array
     {
         $roomId = $state['roomId'];
-        $type   = $moveData['type'] ?? '';
+        $type = $moveData['type'] ?? '';
 
         if ($type === 'pack.answer') {
             $state = PackGameLogic::submitAnswer($state, $guestId, $moveData['answer'] ?? '');
 
             $answered = count($state['pendingAnswers']) + ($state['phase'] === 'reveal' ? count($state['answers']) : 0);
-            $total    = count($state['playerOrder']);
+            $total = count($state['playerOrder']);
 
             if ($state['phase'] === 'reveal') {
                 Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
@@ -469,7 +469,9 @@ class GameService
         }
 
         if ($type === 'pack.timeout') {
-            if ($state['phase'] !== 'answering') return $state;
+            if ($state['phase'] !== 'answering') {
+                return $state;
+            }
             $state = PackGameLogic::revealAnswers($state);
             Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
             $this->broadcastPackRoundEnded($roomId, $gameId, $state);
@@ -478,7 +480,9 @@ class GameService
         }
 
         if ($type === 'pack.advance') {
-            if ($state['phase'] !== 'reveal') return $state;
+            if ($state['phase'] !== 'reveal') {
+                return $state;
+            }
             $state = PackGameLogic::advanceRound($state);
             Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
 
@@ -496,12 +500,12 @@ class GameService
 
     private function broadcastPackRoundEnded(string $roomId, string $gameId, array $state): void
     {
-        $result  = $state['roundResult'] ?? [];
+        $result = $state['roundResult'] ?? [];
         $answers = [];
         foreach ($state['answers'] as $id => $answer) {
             $answers[] = [
-                'guestId'  => $id,
-                'answer'   => $answer,
+                'guestId' => $id,
+                'answer' => $answer,
                 'isWinner' => in_array($id, $result['winners'] ?? []),
             ];
         }
@@ -535,23 +539,29 @@ class GameService
     private function applyBoardMove(string $gameId, string $guestId, array $moveData, array $state): array
     {
         $roomId = $state['roomId'];
-        $type   = $moveData['type'] ?? '';
+        $type = $moveData['type'] ?? '';
 
         if ($type === 'board.object_grab') {
             $id = $moveData['id'] ?? null;
-            if (!$id || !isset($state['objects'][$id])) return $state;
+            if (! $id || ! isset($state['objects'][$id])) {
+                return $state;
+            }
             broadcast(new BoardObjectGrabbed($roomId, $guestId, $id))->toOthers();
+
             return $state;
         }
 
         if ($type === 'board.object_drag') {
             $id = $moveData['id'] ?? null;
-            if (!$id || !isset($state['objects'][$id])) return $state;
+            if (! $id || ! isset($state['objects'][$id])) {
+                return $state;
+            }
             broadcast(new BoardObjectDragging(
                 $roomId, $guestId, $id,
                 (float) ($moveData['x'] ?? 0),
                 (float) ($moveData['y'] ?? 0),
             ))->toOthers();
+
             return $state;
         }
 
@@ -561,8 +571,8 @@ class GameService
                 $roomId,
                 $guestId,
                 $this->getDisplayName($guestId),
-                (float) ($moveData['x']    ?? 0),
-                (float) ($moveData['y']    ?? 0),
+                (float) ($moveData['x'] ?? 0),
+                (float) ($moveData['y'] ?? 0),
                 (float) ($moveData['camX'] ?? 0),
                 (float) ($moveData['camY'] ?? 0),
                 (float) ($moveData['camW'] ?? 0),
@@ -574,32 +584,41 @@ class GameService
 
         if ($type === 'board.object_move') {
             $id = $moveData['id'] ?? null;
-            if (!$id || !isset($state['objects'][$id])) return $state;
-            $state['objects'][$id]['x']        = (float) ($moveData['x'] ?? 0);
-            $state['objects'][$id]['y']        = (float) ($moveData['y'] ?? 0);
+            if (! $id || ! isset($state['objects'][$id])) {
+                return $state;
+            }
+            $state['objects'][$id]['x'] = (float) ($moveData['x'] ?? 0);
+            $state['objects'][$id]['y'] = (float) ($moveData['y'] ?? 0);
             $state['objects'][$id]['holderId'] = null;
             Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
             broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
+
             return $state;
         }
 
         if ($type === 'board.object_take') {
             $id = $moveData['id'] ?? null;
-            if (!$id || !isset($state['objects'][$id])) return $state;
+            if (! $id || ! isset($state['objects'][$id])) {
+                return $state;
+            }
             $state['objects'][$id]['holderId'] = $guestId;
             Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
             broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
+
             return $state;
         }
 
         if ($type === 'board.object_place') {
             $id = $moveData['id'] ?? null;
-            if (!$id || !isset($state['objects'][$id])) return $state;
-            $state['objects'][$id]['x']        = (float) ($moveData['x'] ?? 0);
-            $state['objects'][$id]['y']        = (float) ($moveData['y'] ?? 0);
+            if (! $id || ! isset($state['objects'][$id])) {
+                return $state;
+            }
+            $state['objects'][$id]['x'] = (float) ($moveData['x'] ?? 0);
+            $state['objects'][$id]['y'] = (float) ($moveData['y'] ?? 0);
             $state['objects'][$id]['holderId'] = null;
             Redis::set("dawdle:game:{$gameId}:state", json_encode($state), 'EX', 14400);
             broadcast(new BoardObjectsChanged($roomId, [$state['objects'][$id]]));
+
             return $state;
         }
 

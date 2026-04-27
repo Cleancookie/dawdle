@@ -34,11 +34,11 @@ class PackRoundStarted implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId'        => $this->gameId,
-            'round'         => $this->round,
-            'totalRounds'   => $this->totalRounds,
-            'question'      => $this->question,
-            'timeLimit'     => $this->timeLimit,
+            'gameId' => $this->gameId,
+            'round' => $this->round,
+            'totalRounds' => $this->totalRounds,
+            'question' => $this->question,
+            'timeLimit' => $this->timeLimit,
             'systemMessage' => "Round {$this->round} of {$this->totalRounds} — {$this->question}",
         ];
     }

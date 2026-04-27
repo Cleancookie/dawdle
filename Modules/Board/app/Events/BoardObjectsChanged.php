@@ -14,7 +14,7 @@ class BoardObjectsChanged implements ShouldBroadcastNow
 
     public function __construct(
         public string $roomId,
-        public array  $objects,
+        public array $objects,
     ) {}
 
     public function broadcastOn(): PresenceChannel

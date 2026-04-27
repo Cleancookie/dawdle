@@ -14,19 +14,19 @@ class GameController extends Controller
     public function move(Request $request, string $gameId): JsonResponse
     {
         $request->validate([
-            'type'        => 'sometimes|string|max:64',
-            'index'       => 'sometimes|integer|min:0|max:8',
-            'guess'       => 'sometimes|string|max:100',
-            'points'      => 'sometimes|array|max:500',
-            'points.*.x'  => 'sometimes|numeric|min:-10|max:810',
-            'points.*.y'  => 'sometimes|numeric|min:-10|max:510',
-            'color'       => ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
-            'width'       => 'sometimes|integer|min:1|max:20',
-            'isEraser'    => 'sometimes|boolean',
-            'strokeId'    => 'sometimes|nullable|string|max:64',
-            'final'       => 'sometimes|boolean',
-            'symbolIdx'   => 'sometimes|integer|min:0|max:30',
-            'id'          => 'sometimes|string|max:64',
+            'type' => 'sometimes|string|max:64',
+            'index' => 'sometimes|integer|min:0|max:8',
+            'guess' => 'sometimes|string|max:100',
+            'points' => 'sometimes|array|max:500',
+            'points.*.x' => 'sometimes|numeric|min:-10|max:810',
+            'points.*.y' => 'sometimes|numeric|min:-10|max:510',
+            'color' => ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'width' => 'sometimes|integer|min:1|max:20',
+            'isEraser' => 'sometimes|boolean',
+            'strokeId' => 'sometimes|nullable|string|max:64',
+            'final' => 'sometimes|boolean',
+            'symbolIdx' => 'sometimes|integer|min:0|max:30',
+            'id' => 'sometimes|string|max:64',
         ]);
         $guestId = $request->header('X-Guest-ID');
         $moveData = $request->all();
@@ -47,17 +47,17 @@ class GameController extends Controller
     public function state(Request $request, string $gameId): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');
-        $state   = $this->gameService->getState($gameId);
+        $state = $this->gameService->getState($gameId);
 
         if ($state === null) {
             return response()->json(['error' => 'Game not found'], 404);
         }
 
-        $roomId      = $state['roomId'] ?? null;
+        $roomId = $state['roomId'] ?? null;
         $playerOrder = $state['playerOrder'] ?? array_values($state['players'] ?? []);
-        $inGame      = $roomId && in_array($guestId, $playerOrder, true);
+        $inGame = $roomId && in_array($guestId, $playerOrder, true);
 
-        if (!$inGame) {
+        if (! $inGame) {
             return response()->json(['error' => 'Forbidden'], 403);
         }
 
@@ -85,7 +85,7 @@ class GameController extends Controller
     public function word(Request $request, string $gameId): JsonResponse
     {
         $guestId = $request->header('X-Guest-ID');
-        $state   = $this->gameService->getState($gameId);
+        $state = $this->gameService->getState($gameId);
 
         if ($state === null) {
             return response()->json(['error' => 'Game not found'], 404);

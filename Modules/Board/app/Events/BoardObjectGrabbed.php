@@ -31,7 +31,7 @@ class BoardObjectGrabbed implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'  => $this->guestId,
+            'guestId' => $this->guestId,
             'objectId' => $this->objectId,
         ];
     }

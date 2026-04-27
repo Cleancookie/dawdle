@@ -17,7 +17,7 @@ class GameSelected implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string
@@ -28,8 +28,9 @@ class GameSelected implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         $label = GameType::tryFrom($this->gameType)?->label() ?? $this->gameType;
+
         return [
-            'gameType'      => $this->gameType,
+            'gameType' => $this->gameType,
             'systemMessage' => "Host changed the game to {$label}",
         ];
     }

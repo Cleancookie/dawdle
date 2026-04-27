@@ -10,8 +10,7 @@ const GAME_MODULES = { tic_tac_toe: TicTacToeGame, pictionary: PictionaryGame, s
 
 const GAME_LABELS = { tic_tac_toe: 'Tic Tac Toe', pictionary: 'Pictionary', spotto: 'Spotto', pack: 'Pack', board: 'BaseBoard' };
 
-// One colour per room member, assigned by join order
-function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySet, selectedGame, onSelectGame, gameInProgress, onWatchGame }) {
+function LobbyView({ members, myGuestId, isHost, hostGuestId, onReadyToggle, myReady, readySet, selectedGame, onSelectGame, gameInProgress, onWatchGame, isPublic, onToggleVisibility, onTransferHost }) {
     const [linkCopied, setLinkCopied] = useState(false);
 
     function copyLink() {
@@ -37,6 +36,17 @@ function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySe
                                     className={`w-2.5 h-2.5 rounded-full shrink-0 ${readySet.has(m.id) ? 'bg-green-500' : 'bg-gray-300'}`}
                                 />
                                 <span className={m.id === myGuestId ? 'font-semibold' : ''}>{m.displayName}</span>
+                                {m.id === hostGuestId && (
+                                    <span className="text-xs text-yellow-600 font-medium">host</span>
+                                )}
+                                {isHost && m.id !== myGuestId && (
+                                    <button
+                                        onClick={() => onTransferHost(m.id)}
+                                        className="ml-auto text-xs text-gray-400 hover:text-gray-700 transition-colors"
+                                    >
+                                        Make host
+                                    </button>
+                                )}
                             </li>
                         ))}
                     </ul>
@@ -86,6 +96,20 @@ function LobbyView({ members, myGuestId, isHost, onReadyToggle, myReady, readySe
                     <p className="text-sm text-gray-700">{GAME_LABELS[selectedGame] ?? selectedGame}</p>
                 )}
             </div>
+
+            {isHost && (
+                <div>
+                    <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                        Visibility
+                    </label>
+                    <button
+                        onClick={onToggleVisibility}
+                        className="px-3 py-1.5 text-sm rounded border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors"
+                    >
+                        {isPublic ? 'Public — make private' : 'Private — make public'}
+                    </button>
+                </div>
+            )}
 
             <div>
                 <label className="block text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -234,7 +258,9 @@ export default function RoomPage({ guest, roomCode, navigate }) {
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const { members, channel, updateMember } = useRoom(room?.roomId, guest.guestId);
-    const isHost = room?.hostGuestId === guest.guestId;
+    const [hostGuestId, setHostGuestId] = useState(null);
+    const [isPublic, setIsPublic] = useState(true);
+    const isHost = hostGuestId === guest.guestId;
 
     useEffect(() => {
         if (!guest.displayName) { navigate('/'); return; }
@@ -261,6 +287,8 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                     .then((joinData) => {
                         if (!joinData) { navigate('/'); return; }
                         setRoom(data);
+                        setHostGuestId(data.hostGuestId);
+                        setIsPublic(data.isPublic ?? true);
                         setSelectedGame(data.selectedGame ?? 'tic_tac_toe');
                         if (data.status === 'playing' && data.activeGame) {
                             setGameSession(data.activeGame);
@@ -286,6 +314,14 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         });
         return () => channel.stopListening('.room.player_updated');
     }, [channel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!channel) return;
+        channel.listen('.room.host_transferred', ({ newHostGuestId }) => {
+            setHostGuestId(newHostGuestId);
+        });
+        return () => channel.stopListening('.room.host_transferred');
+    }, [channel]);
 
     useEffect(() => {
         if (!channel) return;
@@ -510,6 +546,24 @@ export default function RoomPage({ guest, roomCode, navigate }) {
         }).catch(() => {});
     }
 
+    async function handleTransferHost(targetGuestId) {
+        await fetch(`/api/v1/rooms/${roomCode}/transfer-host`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Guest-ID': guest.guestId },
+            body: JSON.stringify({ target_guest_id: targetGuestId }),
+        }).catch(() => {});
+    }
+
+    async function handleToggleVisibility() {
+        const next = !isPublic;
+        setIsPublic(next);
+        await fetch(`/api/v1/rooms/${roomCode}/visibility`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Guest-ID': guest.guestId },
+            body: JSON.stringify({ is_public: next }),
+        }).catch(() => setIsPublic(!next)); // revert on failure
+    }
+
     function leave() {
         if (!room) { navigate('/'); return; }
         fetch(`/api/v1/rooms/${roomCode}/leave`, {
@@ -551,7 +605,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             players: mappedPlayers,
             spectators: spectatorList,
             role: playerIds.includes(guest.guestId) ? 'player' : 'spectator',
-            isHost,
+            isHost: hostGuestId === guest.guestId,
             maxPlayers,
             gameType,
             gameState,
@@ -593,6 +647,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             members={members}
                             myGuestId={guest.guestId}
                             isHost={isHost}
+                            hostGuestId={hostGuestId}
                             onReadyToggle={handleReadyToggle}
                             myReady={myReady}
                             readySet={readySet}
@@ -600,6 +655,9 @@ export default function RoomPage({ guest, roomCode, navigate }) {
                             onSelectGame={handleSelectGame}
                             gameInProgress={!!gameSession}
                             onWatchGame={() => setPhase('playing')}
+                            isPublic={isPublic}
+                            onToggleVisibility={handleToggleVisibility}
+                            onTransferHost={handleTransferHost}
                         />
                     )}
                     {phase === 'playing' && gameConfig && (

@@ -2,10 +2,13 @@
 
 namespace Modules\Room\Services;
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Redis;
 use Modules\Game\Enums\GameType;
 use Modules\Game\Models\GameSession;
 use Modules\Room\Events\ChatMessageSent;
+use Modules\Room\Events\GameSelected;
+use Modules\Room\Events\HostTransferred;
 use Modules\Room\Events\PlayerJoined;
 use Modules\Room\Events\PlayerLeft;
 use Modules\Room\Events\PlayerReady;
@@ -14,7 +17,29 @@ use Modules\Room\Models\RoomGuest;
 
 class RoomService
 {
-    public function create(string $guestId, string $displayName): array
+    public function getRooms(): array
+    {
+        $rooms = Room::where('is_public', true)
+            ->whereIn('status', ['waiting', 'playing'])
+            ->orderBy('created_at', 'desc')
+            ->limit(20)
+            ->get();
+
+        return $rooms->map(function ($room) {
+            $playerCount = (int) Redis::scard("dawdle:room:{$room->id}:players");
+            $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: GameType::TicTacToe->value;
+
+            return [
+                'roomId' => $room->id,
+                'code' => $room->code,
+                'status' => $room->status,
+                'selectedGame' => $selectedGame,
+                'playerCount' => $playerCount,
+            ];
+        })->toArray();
+    }
+
+    public function create(string $guestId, string $displayName, bool $isPublic = true): array
     {
         $attempts = 0;
         do {
@@ -29,9 +54,10 @@ class RoomService
         } while (Room::where('code', $code)->exists());
 
         $room = Room::create([
-            'code'          => $code,
-            'status'        => 'waiting',
+            'code' => $code,
+            'status' => 'waiting',
             'host_guest_id' => $guestId,
+            'is_public' => $isPublic,
         ]);
 
         Redis::hset(
@@ -49,17 +75,17 @@ class RoomService
         Redis::sadd("dawdle:room:{$room->id}:players", $guestId);
 
         RoomGuest::create([
-            'room_id'      => $room->id,
-            'guest_id'     => $guestId,
+            'room_id' => $room->id,
+            'guest_id' => $guestId,
             'display_name' => $displayName,
-            'role'         => 'player',
-            'joined_at'    => now(),
+            'role' => 'player',
+            'joined_at' => now(),
         ]);
 
         return [
-            'roomId'    => $room->id,
-            'code'      => $room->code,
-            'inviteUrl' => url('/room/' . $room->code),
+            'roomId' => $room->id,
+            'code' => $room->code,
+            'inviteUrl' => url('/room/'.$room->code),
         ];
     }
 
@@ -67,18 +93,19 @@ class RoomService
     {
         $room = Room::where('code', $code)->first();
 
-        if (!$room || $room->status === 'closed') {
+        if (! $room || $room->status === 'closed') {
             return null;
         }
 
         $selectedGame = Redis::hget("dawdle:room:{$room->id}", 'selectedGame') ?: GameType::TicTacToe->value;
 
         $result = [
-            'roomId'       => $room->id,
-            'code'         => $room->code,
-            'status'       => $room->status,
-            'hostGuestId'  => $room->host_guest_id,
+            'roomId' => $room->id,
+            'code' => $room->code,
+            'status' => $room->status,
+            'hostGuestId' => $room->host_guest_id,
             'selectedGame' => $selectedGame,
+            'isPublic' => (bool) $room->is_public,
         ];
 
         // Include active game session so reconnecting clients can restore game phase.
@@ -101,9 +128,9 @@ class RoomService
                     );
 
                     $result['activeGame'] = [
-                        'gameId'    => $session->id,
-                        'gameType'  => $session->game_type,
-                        'players'   => $players,
+                        'gameId' => $session->id,
+                        'gameType' => $session->game_type,
+                        'players' => $players,
                         'firstTurn' => $state['currentTurn'] ?? $state['currentDrawer'] ?? null,
                     ];
                 }
@@ -125,20 +152,20 @@ class RoomService
 
         // Determine role: preserve player status for guests reconnecting mid-game.
         $existingGuest = Redis::hget("dawdle:guest:{$guestId}", 'roomId');
-        $wasPlayer     = Redis::sismember("dawdle:room:{$room->id}:players", $guestId);
+        $wasPlayer = Redis::sismember("dawdle:room:{$room->id}:players", $guestId);
         $role = ($status === 'waiting' || $wasPlayer) ? 'player' : 'spectator';
 
         $existing = RoomGuest::where('room_id', $room->id)->where('guest_id', $guestId)->first();
 
         if ($existing && $existing->left_at !== null) {
             $existing->update(['left_at' => null, 'role' => $role, 'joined_at' => now()]);
-        } elseif (!$existing) {
+        } elseif (! $existing) {
             RoomGuest::create([
-                'room_id'      => $room->id,
-                'guest_id'     => $guestId,
+                'room_id' => $room->id,
+                'guest_id' => $guestId,
                 'display_name' => $displayName,
-                'role'         => $role,
-                'joined_at'    => now(),
+                'role' => $role,
+                'joined_at' => now(),
             ]);
         }
 
@@ -153,16 +180,16 @@ class RoomService
 
         return [
             'roomId' => $room->id,
-            'code'   => $room->code,
-            'role'   => $role,
+            'code' => $room->code,
+            'role' => $role,
         ];
     }
 
     public function sendChat(string $code, string $guestId, string $message): void
     {
         $roomId = Room::where('code', $code)->value('id');
-        if (!$roomId) {
-            throw new \Illuminate\Database\Eloquent\ModelNotFoundException();
+        if (! $roomId) {
+            throw new ModelNotFoundException;
         }
 
         $guest = Redis::hgetall("dawdle:guest:{$guestId}");
@@ -183,8 +210,11 @@ class RoomService
 
     public function leave(string $code, string $guestId): void
     {
-        $roomId = Room::where('code', $code)->value('id');
-        if (!$roomId) return;
+        $room = Room::where('code', $code)->first();
+        if (! $room) {
+            return;
+        }
+        $roomId = $room->id;
 
         $displayName = Redis::hget("dawdle:guest:{$guestId}", 'displayName') ?? 'Guest';
         RoomGuest::where('room_id', $roomId)->where('guest_id', $guestId)->update(['left_at' => now()]);
@@ -192,13 +222,50 @@ class RoomService
         Redis::srem("dawdle:room:{$roomId}:players", $guestId);
         Redis::srem("dawdle:room:{$roomId}:ready", $guestId);
         broadcast(new PlayerLeft($roomId, $guestId, $displayName));
+
+        if ($room->host_guest_id === $guestId) {
+            $nextHost = Redis::srandmember("dawdle:room:{$roomId}:players");
+            if ($nextHost) {
+                $room->update(['host_guest_id' => $nextHost]);
+                Redis::hset("dawdle:room:{$roomId}", 'hostGuestId', $nextHost);
+                broadcast(new HostTransferred($roomId, $nextHost));
+            }
+        }
+    }
+
+    public function transferHost(string $code, string $guestId, string $targetGuestId): void
+    {
+        $room = Room::where('code', $code)->firstOrFail();
+
+        if ($room->host_guest_id !== $guestId) {
+            throw new \InvalidArgumentException('Only the host can transfer host');
+        }
+
+        if (! Redis::sismember("dawdle:room:{$room->id}:players", $targetGuestId)) {
+            throw new \InvalidArgumentException('Target must be a player in this room');
+        }
+
+        $room->update(['host_guest_id' => $targetGuestId]);
+        Redis::hset("dawdle:room:{$room->id}", 'hostGuestId', $targetGuestId);
+        broadcast(new HostTransferred($room->id, $targetGuestId));
+    }
+
+    public function setIsPublic(string $code, string $guestId, bool $isPublic): void
+    {
+        $room = Room::where('code', $code)->firstOrFail();
+
+        if ($room->host_guest_id !== $guestId) {
+            throw new \InvalidArgumentException('Only the host can change room visibility');
+        }
+
+        $room->update(['is_public' => $isPublic]);
     }
 
     public function toggleReady(string $code, string $guestId): array
     {
         $roomId = Room::where('code', $code)->value('id');
-        if (!$roomId) {
-            throw new \Illuminate\Database\Eloquent\ModelNotFoundException();
+        if (! $roomId) {
+            throw new ModelNotFoundException;
         }
 
         $key = "dawdle:room:{$roomId}:ready";
@@ -244,6 +311,6 @@ class RoomService
         }
 
         Redis::hset("dawdle:room:{$room->id}", 'selectedGame', $gameType);
-        broadcast(new \Modules\Room\Events\GameSelected($room->id, $gameType));
+        broadcast(new GameSelected($room->id, $gameType));
     }
 }

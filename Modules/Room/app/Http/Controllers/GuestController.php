@@ -15,7 +15,7 @@ class GuestController extends Controller
     {
         $request->validate(['display_name' => 'required|string|min:1|max:32']);
 
-        $guestId     = $request->header('X-Guest-ID');
+        $guestId = $request->header('X-Guest-ID');
         $displayName = $request->input('display_name');
 
         Redis::hset("dawdle:guest:{$guestId}", 'displayName', $displayName);

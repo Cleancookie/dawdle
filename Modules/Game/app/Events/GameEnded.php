@@ -21,7 +21,7 @@ class GameEnded implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string
@@ -32,9 +32,9 @@ class GameEnded implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'gameId'        => $this->gameId,
-            'scores'        => $this->scores,
-            'winner'        => $this->winner,
+            'gameId' => $this->gameId,
+            'scores' => $this->scores,
+            'winner' => $this->winner,
             'systemMessage' => 'Game over!',
         ];
     }

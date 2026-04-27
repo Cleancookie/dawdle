@@ -20,7 +20,7 @@ class PlayerLeft implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string
@@ -31,8 +31,8 @@ class PlayerLeft implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'       => $this->guestId,
-            'displayName'   => $this->displayName,
+            'guestId' => $this->guestId,
+            'displayName' => $this->displayName,
             'systemMessage' => "{$this->displayName} left the room",
         ];
     }

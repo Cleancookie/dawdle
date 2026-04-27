@@ -5,6 +5,7 @@ namespace Modules\Spotto\Services;
 class GameLogic
 {
     public const MIN_PLAYERS = 2;
+
     public const MAX_PLAYERS = 8;
 
     // 31 visually distinct emoji — maps to the 31 symbols of the order-5 projective plane

@@ -16,8 +16,8 @@ class BoardObjectDragging implements ShouldBroadcastNow
         public string $roomId,
         public string $guestId,
         public string $objectId,
-        public float  $x,
-        public float  $y,
+        public float $x,
+        public float $y,
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -33,10 +33,10 @@ class BoardObjectDragging implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'  => $this->guestId,
+            'guestId' => $this->guestId,
             'objectId' => $this->objectId,
-            'x'        => $this->x,
-            'y'        => $this->y,
+            'x' => $this->x,
+            'y' => $this->y,
         ];
     }
 }

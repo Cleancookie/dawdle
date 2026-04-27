@@ -4,6 +4,7 @@ namespace Modules\Room\Providers;
 
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
 use Illuminate\Support\Facades\Route;
+use Modules\Room\Http\Middleware\ValidateGuestId;
 
 class RouteServiceProvider extends ServiceProvider
 {
@@ -13,7 +14,7 @@ class RouteServiceProvider extends ServiceProvider
     {
         parent::boot();
 
-        Route::aliasMiddleware('guest.id', \Modules\Room\Http\Middleware\ValidateGuestId::class);
+        Route::aliasMiddleware('guest.id', ValidateGuestId::class);
     }
 
     public function map(): void

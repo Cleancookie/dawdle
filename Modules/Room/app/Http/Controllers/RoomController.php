@@ -19,13 +19,21 @@ class RoomController extends Controller
         private GameService $gameService,
     ) {}
 
+    public function index(): JsonResponse
+    {
+        return response()->json($this->roomService->getRooms());
+    }
+
     public function store(Request $request): JsonResponse
     {
-        $request->validate(['display_name' => 'required|string|min:1|max:32']);
+        $request->validate([
+            'display_name' => 'required|string|min:1|max:32',
+            'is_public' => 'boolean',
+        ]);
         $guestId = $request->header('X-Guest-ID');
-        $displayName = $request->input('display_name');
+        $isPublic = $request->boolean('is_public', true);
 
-        return response()->json($this->roomService->create($guestId, $displayName), 201);
+        return response()->json($this->roomService->create($guestId, $request->input('display_name'), $isPublic), 201);
     }
 
     public function show(Request $request, string $code): JsonResponse
@@ -63,7 +71,7 @@ class RoomController extends Controller
 
         try {
             $this->roomService->sendChat($code, $guestId, $request->input('message'));
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             return response()->json(['error' => 'Room not found'], 404);
         } catch (\InvalidArgumentException) {
             return response()->json(['error' => 'Not a member of this room'], 403);
@@ -78,7 +86,7 @@ class RoomController extends Controller
 
         try {
             $result = $this->roomService->toggleReady($code, $guestId);
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             return response()->json(['error' => 'Room not found'], 404);
         }
 
@@ -99,7 +107,7 @@ class RoomController extends Controller
 
         try {
             $this->roomService->selectGame($code, $guestId, $request->input('game_type'));
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException) {
+        } catch (ModelNotFoundException) {
             return response()->json(['error' => 'Room not found'], 404);
         } catch (\InvalidArgumentException $e) {
             return response()->json(['error' => $e->getMessage()], 403);
@@ -112,6 +120,39 @@ class RoomController extends Controller
     {
         $guestId = $request->header('X-Guest-ID');
         $this->roomService->leave($code, $guestId);
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function transferHost(Request $request, string $code): JsonResponse
+    {
+        $request->validate(['target_guest_id' => 'required|string']);
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $this->roomService->transferHost($code, $guestId, $request->input('target_guest_id'));
+        } catch (ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 403);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function setVisibility(Request $request, string $code): JsonResponse
+    {
+        $request->validate(['is_public' => 'required|boolean']);
+        $guestId = $request->header('X-Guest-ID');
+
+        try {
+            $this->roomService->setIsPublic($code, $guestId, $request->boolean('is_public'));
+        } catch (ModelNotFoundException) {
+            return response()->json(['error' => 'Room not found'], 404);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 403);
+        }
+
         return response()->json(['ok' => true]);
     }
 }

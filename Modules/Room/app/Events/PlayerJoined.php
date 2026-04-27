@@ -21,7 +21,7 @@ class PlayerJoined implements ShouldBroadcastNow
 
     public function broadcastOn(): PresenceChannel
     {
-        return new PresenceChannel('room.' . $this->roomId);
+        return new PresenceChannel('room.'.$this->roomId);
     }
 
     public function broadcastAs(): string
@@ -32,9 +32,9 @@ class PlayerJoined implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'       => $this->guestId,
-            'displayName'   => $this->displayName,
-            'role'          => $this->role,
+            'guestId' => $this->guestId,
+            'displayName' => $this->displayName,
+            'role' => $this->role,
             'systemMessage' => "{$this->displayName} joined the room",
         ];
     }

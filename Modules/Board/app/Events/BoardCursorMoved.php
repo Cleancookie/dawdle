@@ -16,12 +16,12 @@ class BoardCursorMoved implements ShouldBroadcastNow
         public string $roomId,
         public string $guestId,
         public string $displayName,
-        public float  $x,
-        public float  $y,
-        public float  $camX,
-        public float  $camY,
-        public float  $camW,
-        public float  $camH,
+        public float $x,
+        public float $y,
+        public float $camX,
+        public float $camY,
+        public float $camW,
+        public float $camH,
     ) {}
 
     public function broadcastOn(): PresenceChannel
@@ -37,14 +37,15 @@ class BoardCursorMoved implements ShouldBroadcastNow
     public function broadcastWith(): array
     {
         return [
-            'guestId'     => $this->guestId,
+            'guestId' => $this->guestId,
             'displayName' => $this->displayName,
-            'x'           => $this->x,
-            'y'           => $this->y,
-            'camX'        => $this->camX,
-            'camY'        => $this->camY,
-            'camW'        => $this->camW,
-            'camH'        => $this->camH,
+            'x' => $this->x,
+            'y' => $this->y,
+            'camX' => $this->camX,
+            'camY' => $this->camY,
+            'camW' => $this->camW,
+            'camH' => $this->camH,
+            // 'systemMessage' => "{$this->displayName} moved their cursor",
         ];
     }
 }
