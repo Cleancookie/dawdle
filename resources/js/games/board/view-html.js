@@ -35,6 +35,7 @@ export default class HtmlBoardView {
         this._lastObjDragSent  = 0;
         this._gesture          = null;
         this._pendingInsert    = null; // slot index for next arriving hand card
+        this._topZ             = 1;
 
         this._build(container);
         this._setupInput(container);
@@ -393,7 +394,7 @@ export default class HtmlBoardView {
                 this._container.setPointerCapture(e.pointerId);
                 ref.dragging = true;
                 ref.el.style.cursor  = 'grabbing';
-                ref.el.style.zIndex  = '5';
+                ref.el.style.zIndex  = String(++this._topZ);
                 const objWx = parseFloat(ref.el.style.left);
                 const objWy = parseFloat(ref.el.style.top);
                 const offX  = (sx + this._scrollX) - objWx;
@@ -521,7 +522,6 @@ export default class HtmlBoardView {
             if (!ref) return;
             ref.dragging        = false;
             ref.el.style.cursor = 'grab';
-            ref.el.style.zIndex = '';
 
             if (sy >= this._handTop()) {
                 this._pendingInsert = this._expanded ? this._handInsertIndex(sx) : this._handOrder.length;
