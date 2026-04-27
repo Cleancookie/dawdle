@@ -404,7 +404,7 @@ export default function RoomPage({ guest, roomCode, navigate }) {
             'ttt.move_made',
             'pict.round_started', 'pict.stroke', 'pict.stroke_delta',
             'pict.canvas_clear', 'pict.guess_correct', 'pict.round_ended',
-            'spotto.round_started', 'spotto.point_scored', 'spotto.hover',
+            'spotto.round_started', 'spotto.point_scored',
             'pack.round_started', 'pack.answer_submitted', 'pack.round_ended',
             'board.objects_changed', 'board.object_grabbed',
         ];

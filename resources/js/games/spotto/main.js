@@ -123,7 +123,10 @@ export default class SpottoEngine extends SimpleEmitter {
         clearTimeout(this._hoverTimer);
         if (symbolIdx !== null) {
             this._hoverTimer = setTimeout(() => {
-                this._onMove({ type: 'spotto.hover', symbolIdx, cardId });
+                this.emit('whisper', {
+                    event: 'spotto.hover',
+                    payload: { gameId: this._config.gameId, guestId: this._config.guestId, symbolIdx, cardId },
+                });
             }, HOVER_DEBOUNCE_MS);
         }
     }

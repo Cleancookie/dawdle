@@ -613,11 +613,13 @@ export default class SpottoGame extends SimpleEmitter {
         collapseChat: true,
     };
     static maxPlayers = 8;
+    static whisperEvents = ['spotto.hover'];
 
     constructor(container, config) {
         super();
         this._engine = new SpottoEngine(config, (moveData) => this.emit('move', moveData));
         this._engine.on('complete', (result) => this.emit('complete', result));
+        this._engine.on('whisper', (w) => this.emit('whisper', w));
 
         this._root = ReactDOM.createRoot(container);
         this._root.render(<SpottoApp engine={this._engine} config={config} />);
