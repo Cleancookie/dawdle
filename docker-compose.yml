@@ -101,6 +101,12 @@ services:
       DB_USERNAME: ${DB_USERNAME:-dawdle}
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       REDIS_HOST: redis
+      REVERB_APP_ID: ${REVERB_APP_ID:-dawdle-local}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-dawdle-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-dawdle-secret}
+      REVERB_HOST: reverb
+      REVERB_PORT: ${REVERB_PORT:-8080}
+      REVERB_SCHEME: http
     depends_on:
       app:
         condition: service_healthy
